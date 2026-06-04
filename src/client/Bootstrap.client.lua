@@ -2,24 +2,24 @@
 
 local ControllersFolder = script.Parent:WaitForChild("Controllers")
 
-local AudioInputController = require((ControllersFolder:WaitForChild("AudioInputController") :: ModuleScript))
-local VisualizerController = require((ControllersFolder:WaitForChild("VisualizerController") :: ModuleScript))
+local AudioController = require((ControllersFolder:WaitForChild("AudioController") :: ModuleScript))
+local ResonanceController = require((ControllersFolder:WaitForChild("ResonanceController") :: ModuleScript))
+local CameraController = require((ControllersFolder:WaitForChild("CameraController") :: ModuleScript))
 local UIController = require((ControllersFolder:WaitForChild("UIController") :: ModuleScript))
 local InputController = require((ControllersFolder:WaitForChild("InputController") :: ModuleScript))
-local EffectsController = require((ControllersFolder:WaitForChild("EffectsController") :: ModuleScript))
 
 local controllers = {
-	AudioInputController,
-	VisualizerController,
-	EffectsController,
+	AudioController,
+	ResonanceController,
+	CameraController,
 	UIController,
 	InputController,
 }
 
 local context = {
-	AudioInputController = AudioInputController,
-	VisualizerController = VisualizerController,
-	EffectsController = EffectsController,
+	AudioController = AudioController,
+	ResonanceController = ResonanceController,
+	CameraController = CameraController,
 	UIController = UIController,
 	InputController = InputController,
 }

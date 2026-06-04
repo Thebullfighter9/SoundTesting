@@ -22,7 +22,7 @@ function NumberUtil.remap(value: number, inMin: number, inMax: number, outMin: n
 	return NumberUtil.lerp(outMin, outMax, NumberUtil.inverseLerp(inMin, inMax, value))
 end
 
-function NumberUtil.expSmoothing(current: number, target: number, deltaTime: number, speed: number): number
+function NumberUtil.expSmooth(current: number, target: number, deltaTime: number, speed: number): number
 	local alpha = 1 - math.exp(-math.max(0, speed) * math.max(0, deltaTime))
 	return current + (target - current) * alpha
 end

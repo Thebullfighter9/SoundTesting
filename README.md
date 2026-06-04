@@ -1,28 +1,29 @@
 # SoundTesting: Resonance Field
 
-Resonance Field is a minimal Roblox Luau audio physics visualizer. It is a clean kinetic sculpture: a measured field of pins, rings, surface tiles, and pulse masses driven by a demo signal, asset audio, or microphone analyzer data when available.
+Resonance Field is a minimal Roblox Luau audio physics visualizer: a quiet gallery installation where a tiled speaker-membrane sculpture responds to a demo signal, asset audio, or microphone analyzer data when available.
 
-This is a scripting portfolio piece, not a game loop. There are no rounds, quests, NPCs, combat, lore, monetization, or simulator-style progression.
+It exists as a scripting portfolio piece. There are no rounds, quests, NPCs, coins, XP, lore systems, monetization, or DataStores.
 
 ## Controls
 
-- `E`: send a server-validated field pulse
-- `Space`: send a field pulse while allowing default jump to continue
-- `B`: cycle field preset
+- `H`: hide or show UI
+- `D`: Demo mode
 - `M`: try Mic mode
-- `N`: return to Demo mode
-- UI: mode selection, asset analysis, reset, preset, sensitivity, intensity, pulse
+- `A`: play the current asset ID
+- `V`: cycle visual style
+- `E`: drop a server-validated resonance marble
+- `R`: reset camera framing
 
 ## Features
 
-- Demo mode starts immediately and needs no external assets.
+- Demo mode animates immediately and needs no external assets.
 - Asset mode attempts a modular Roblox audio graph, then falls back to local `Sound` loudness.
 - Mic mode attempts modular microphone analysis and falls back cleanly if unavailable.
-- Presets: Field, Wave, Orbit, Still.
-- Server-built matte gallery environment with field anchors and reference rings.
-- Local-only kinetic field visuals with reused instances.
-- One narrow client-to-server remote for rate-limited pulse mass spawning.
-- Generated UI kept small and utilitarian.
+- Visual styles: Field, Orbit, Marbles, Minimal.
+- Server-built matte gallery environment with a 17x17 anchor grid.
+- Local-only tiled field, shockwave ring, orbit points, and subtle speaker pulses.
+- One narrow client-to-server remote for rate-limited marble spawning.
+- Generated UI kept small, bottom-left, and secondary to the sculpture.
 
 ## Systems Demonstrated
 
@@ -45,11 +46,11 @@ Connect Roblox Studio to the Rojo server and press Play.
 
 ## Demo Mode
 
-Demo mode generates a synthetic audio frame every render step. It creates smooth bands, RMS, peak, bass, and beat values so the field moves immediately even in an empty place.
+Demo mode generates a synthetic audio frame every render step. It creates smooth bands, RMS, peak, bass, and beat values so the field moves immediately in the first few seconds.
 
 ## Asset Mode
 
-Paste a numeric Roblox audio asset ID and press `Analyze`. The client first attempts:
+Paste a numeric Roblox audio asset ID and press `Play`, or press `A`. The client first attempts:
 
 - `AudioPlayer`
 - `AudioAnalyzer`
@@ -79,10 +80,10 @@ docs
 
 ## Security Notes
 
-Audio frames, microphone state, spectrum data, RMS, peak, bass, and beat values stay client-side. The only remote is `FieldPulseRequested`, and its payload contains only optional cosmetic intensity. The server decides spawn position, size, velocity, physical properties, lifetime, and network ownership.
+Audio frames, microphone state, spectrum data, RMS, peak, bass, and beat values stay client-side. The only remote is `MarbleRequested`, and its payload contains only optional cosmetic energy. The server decides spawn position, size, velocity, physical properties, lifetime, and network ownership.
 
 ## Performance Notes
 
-The field visuals are created once and updated in place from one render connection. UI readouts are throttled. The server only handles limited pulse mass spawns and cleanup.
+The field visuals are created once and updated in place from one render connection. UI readouts are throttled. The server only handles limited marble spawns and cleanup.
 
 ## Screenshots

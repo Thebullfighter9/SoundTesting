@@ -1,6 +1,6 @@
 # Architecture
 
-Resonance Field uses a Rojo layout with a clear runtime split.
+Resonance Field uses a Rojo layout with a clear server/client/shared split.
 
 ```text
 src/shared -> ReplicatedStorage/Shared
@@ -16,19 +16,19 @@ Shared modules contain constants, exported types, remote names, and small utilit
 
 Server modules own replicated state:
 
-- `RemoteService` creates the remotes folder and `FieldPulseRequested`.
-- `LabWorldService` rebuilds the matte field sculpture environment.
-- `FieldPulseService` validates pulse requests and spawns temporary pulse masses.
+- `RemoteService` creates the remotes folder and `MarbleRequested`.
+- `GalleryService` rebuilds the matte gallery room, platform, anchor grid, and marble container.
+- `MarbleService` validates marble requests and spawns temporary server-owned marbles.
 
 ## Client
 
 Client controllers own presentation and input:
 
-- `AudioInputController` produces audio frames in Demo, Asset, or Mic mode.
-- `VisualizerController` updates local-only field pins, surface tiles, wave segments, and orbit masses.
-- `EffectsController` handles restrained pulse feedback and toast messages.
+- `AudioController` produces audio frames in Demo, Asset, or Mic mode.
+- `ResonanceController` updates local-only field tiles, orbit points, shockwave ring, and speaker overlays.
+- `CameraController` frames the sculpture and applies clamped FOV feedback.
 - `UIController` builds the compact generated UI.
-- `InputController` binds keys and sends narrow pulse requests.
+- `InputController` binds keys and sends narrow marble requests.
 
 ## Audio Boundary
 
@@ -36,7 +36,7 @@ Audio analysis is local presentation state. Spectrum, RMS, peak, beat, microphon
 
 ## Remote Boundary
 
-The only gameplay remote is `FieldPulseRequested`, sent client -> server. It accepts optional cosmetic intensity only. The server ignores client position, velocity, color, size, and ownership claims.
+The only gameplay remote is `MarbleRequested`, sent client -> server. It accepts optional cosmetic energy only. The server ignores client position, velocity, color, size, and ownership claims.
 
 ## Lifecycle
 

@@ -3,19 +3,19 @@
 local ServicesFolder = script.Parent:WaitForChild("Services")
 
 local RemoteService = require((ServicesFolder:WaitForChild("RemoteService") :: ModuleScript))
-local LabWorldService = require((ServicesFolder:WaitForChild("LabWorldService") :: ModuleScript))
-local FieldPulseService = require((ServicesFolder:WaitForChild("FieldPulseService") :: ModuleScript))
+local GalleryService = require((ServicesFolder:WaitForChild("GalleryService") :: ModuleScript))
+local MarbleService = require((ServicesFolder:WaitForChild("MarbleService") :: ModuleScript))
 
 local services = {
 	RemoteService,
-	LabWorldService,
-	FieldPulseService,
+	GalleryService,
+	MarbleService,
 }
 
 local context = {
 	RemoteService = RemoteService,
-	LabWorldService = LabWorldService,
-	FieldPulseService = FieldPulseService,
+	GalleryService = GalleryService,
+	MarbleService = MarbleService,
 }
 
 for _, service in ipairs(services) do

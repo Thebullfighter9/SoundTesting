@@ -60,6 +60,12 @@ function RemoteService:Init(_context: any?)
 
 	remotesFolder = folder
 
+	for _, child in ipairs(folder:GetChildren()) do
+		if not isKnownRemote(child.Name) or not child:IsA("RemoteEvent") then
+			child:Destroy()
+		end
+	end
+
 	for _, remoteName in pairs(RemoteNames :: { [string]: string }) do
 		remotes[remoteName] = getOrCreateRemote(folder, remoteName)
 	end

@@ -1,8 +1,7 @@
 --!strict
 
-export type VisualizerPreset = "Field" | "Wave" | "Orbit" | "Still"
 export type AudioMode = "Demo" | "Asset" | "Mic"
-export type BandArray = { number }
+export type VisualStyle = "Field" | "Orbit" | "Marbles" | "Minimal"
 
 export type AudioFrame = {
 	rms: number,
@@ -13,8 +12,8 @@ export type AudioFrame = {
 	time: number,
 }
 
-export type FieldPulsePayload = {
-	intensity: number?,
+export type MarblePayload = {
+	energy: number?,
 }
 
 export type Controller = {

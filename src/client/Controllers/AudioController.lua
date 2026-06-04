@@ -15,9 +15,8 @@ local NumberUtil = require((Util:WaitForChild("NumberUtil") :: ModuleScript))
 
 type AudioFrame = Types.AudioFrame
 type AudioMode = Types.AudioMode
-type BandArray = Types.BandArray
 
-local AudioInputController = {}
+local AudioController = {}
 
 local initialized = false
 local started = false
@@ -26,7 +25,7 @@ local audioMaid = Maid.new()
 local callbacks: { (AudioFrame) -> () } = {}
 
 local mode: AudioMode = "Demo"
-local status = "Demo pulse active"
+local status = "Demo signal active"
 local sensitivity = Constants.DEFAULT_SENSITIVITY
 local demoTime = 0
 local rollingEnergy = 0.12
@@ -35,7 +34,7 @@ local assetAnalyzer: AudioAnalyzer? = nil
 local micAnalyzer: AudioAnalyzer? = nil
 local classicSound: Sound? = nil
 
-local smoothedBands: BandArray = table.create(Constants.FIELD_BAND_COUNT, 0)
+local smoothedBands: { number } = table.create(Constants.VISUAL_BAND_COUNT, 0)
 local currentFrame: AudioFrame = {
 	rms = 0,
 	peak = 0,
@@ -44,11 +43,6 @@ local currentFrame: AudioFrame = {
 	bands = smoothedBands,
 	time = 0,
 }
-
-local function makeBands(value: number): BandArray
-	local bands = table.create(Constants.FIELD_BAND_COUNT, value)
-	return bands
-end
 
 local function getRenderSignal(): RBXScriptSignal
 	local preRender = (RunService :: any).PreRender
@@ -59,14 +53,18 @@ local function getRenderSignal(): RBXScriptSignal
 	return RunService.RenderStepped
 end
 
+local function setStatus(nextStatus: string)
+	status = nextStatus
+end
+
 local function notifyFrameChanged()
 	for _, callback in ipairs(callbacks) do
 		callback(currentFrame)
 	end
 end
 
-local function setStatus(nextStatus: string)
-	status = nextStatus
+local function makeBands(value: number): { number }
+	return table.create(Constants.VISUAL_BAND_COUNT, value)
 end
 
 local function readNumberProperty(instance: any, propertyName: string, fallback: number): number
@@ -81,8 +79,15 @@ local function readNumberProperty(instance: any, propertyName: string, fallback:
 	return NumberUtil.sanitizeFiniteNumber(value, fallback)
 end
 
-local function createAudioFolder(): Folder
+local function stopAudioGraph()
 	audioMaid:Cleanup()
+	assetAnalyzer = nil
+	micAnalyzer = nil
+	classicSound = nil
+end
+
+local function createAudioFolder(): Folder
+	stopAudioGraph()
 
 	local playerGui = LocalPlayer:WaitForChild("PlayerGui")
 	local folder = InstanceUtil.create("Folder", {
@@ -91,13 +96,6 @@ local function createAudioFolder(): Folder
 
 	audioMaid:Give(folder)
 	return folder
-end
-
-local function stopAudioGraph()
-	audioMaid:Cleanup()
-	assetAnalyzer = nil
-	micAnalyzer = nil
-	classicSound = nil
 end
 
 local function sanitizeAssetId(assetIdText: string): string?
@@ -162,17 +160,17 @@ local function createWire(parent: Instance, source: Instance, target: Instance):
 	}, parent) :: Wire
 end
 
-local function buildBandsFromSpectrum(spectrum: { any }, rms: number, peak: number): BandArray
+local function bandsFromSpectrum(spectrum: { any }, rms: number, peak: number): { number }
 	if #spectrum == 0 then
-		return makeBands(math.max(rms, peak * 0.75))
+		return makeBands(math.max(rms, peak * 0.8))
 	end
 
-	local bands = table.create(Constants.FIELD_BAND_COUNT, 0)
+	local bands = table.create(Constants.VISUAL_BAND_COUNT, 0)
 	local sourceCount = #spectrum
 
-	for bandIndex = 1, Constants.FIELD_BAND_COUNT do
-		local startIndex = math.max(1, math.floor((bandIndex - 1) / Constants.FIELD_BAND_COUNT * sourceCount) + 1)
-		local endIndex = math.max(startIndex, math.floor(bandIndex / Constants.FIELD_BAND_COUNT * sourceCount))
+	for bandIndex = 1, Constants.VISUAL_BAND_COUNT do
+		local startIndex = math.max(1, math.floor((bandIndex - 1) / Constants.VISUAL_BAND_COUNT * sourceCount) + 1)
+		local endIndex = math.max(startIndex, math.floor(bandIndex / Constants.VISUAL_BAND_COUNT * sourceCount))
 		local total = 0
 		local samples = 0
 
@@ -182,28 +180,27 @@ local function buildBandsFromSpectrum(spectrum: { any }, rms: number, peak: numb
 				value = math.abs(value)
 			end
 			if value > 1 then
-				value = value / 100
+				value /= 100
 			end
 			total += math.clamp(value, 0, 1)
 			samples += 1
 		end
 
-		local average = if samples > 0 then total / samples else 0
-		bands[bandIndex] = math.clamp(average * sensitivity, 0, 1)
+		bands[bandIndex] = math.clamp((if samples > 0 then total / samples else 0) * sensitivity, 0, 1)
 	end
 
 	return bands
 end
 
-local function synthesizeBandsFromEnergy(rms: number, peak: number, timeNow: number): BandArray
-	local bands = table.create(Constants.FIELD_BAND_COUNT, 0)
-	local energy = math.clamp(math.max(rms, peak * 0.8) * sensitivity, 0, 1)
+local function synthesizeBands(rms: number, peak: number, timeNow: number): { number }
+	local bands = table.create(Constants.VISUAL_BAND_COUNT, 0)
+	local energy = math.clamp(math.max(rms, peak * 0.82) * sensitivity, 0, 1)
 
-	for index = 1, Constants.FIELD_BAND_COUNT do
-		local bandAlpha = (index - 1) / Constants.FIELD_BAND_COUNT
-		local wave = (math.sin(timeNow * 4 + bandAlpha * math.pi * 6) + 1) * 0.5
-		local shaped = energy * (0.45 + wave * 0.55) * (1 - bandAlpha * 0.28)
-		bands[index] = math.clamp(shaped, 0, 1)
+	for index = 1, Constants.VISUAL_BAND_COUNT do
+		local alpha = (index - 1) / Constants.VISUAL_BAND_COUNT
+		local wave = (math.sin(timeNow * 3.5 + alpha * math.pi * 5.5) + 1) * 0.5
+		local quietShape = 0.45 + wave * 0.38 + math.max(0, 1 - alpha * 2.4) * 0.24
+		bands[index] = math.clamp(energy * quietShape, 0, 1)
 	end
 
 	return bands
@@ -217,34 +214,27 @@ local function readAnalyzerFrame(analyzer: AudioAnalyzer, deltaTime: number)
 	local okSpectrum, spectrumValues = pcall(function()
 		return analyzer:GetSpectrum()
 	end)
-
 	if okSpectrum and typeof(spectrumValues) == "table" then
 		spectrum = spectrumValues :: { any }
 	end
 
-	local bands = if #spectrum > 0
-		then buildBandsFromSpectrum(spectrum, rms, peak)
-		else synthesizeBandsFromEnergy(rms, peak, os.clock())
-
+	local bands = if #spectrum > 0 then bandsFromSpectrum(spectrum, rms, peak) else synthesizeBands(rms, peak, os.clock())
 	local bassTotal = 0
-	for index = 1, math.min(6, #bands) do
+	for index = 1, math.min(5, #bands) do
 		bassTotal += bands[index]
 	end
 
-	local bass = bassTotal / 6
-	local rawPeak = math.max(peak, bass)
-	local rawRms = math.max(rms, bass * 0.6)
-
-	AudioInputController:_ApplyRawFrame(bands, rawRms, rawPeak, bass, deltaTime)
+	local bass = bassTotal / 5
+	AudioController:_ApplyRawFrame(bands, math.max(rms, bass * 0.55), math.max(peak, bass), bass, deltaTime)
 end
 
 local function readClassicSoundFrame(sound: Sound, deltaTime: number)
-	local loudness = math.clamp(readNumberProperty(sound, "PlaybackLoudness", 0) / 1000 * sensitivity, 0, 1)
-	local peak = math.clamp(loudness * 1.25, 0, 1)
-	local bands = synthesizeBandsFromEnergy(loudness, peak, os.clock())
+	local loudness = math.clamp(readNumberProperty(sound, "PlaybackLoudness", 0) / 950 * sensitivity, 0, 1)
+	local peak = math.clamp(loudness * 1.18, 0, 1)
+	local bands = synthesizeBands(loudness, peak, os.clock())
 	local bass = math.clamp((bands[1] + bands[2] + bands[3] + bands[4]) / 4, 0, 1)
 
-	AudioInputController:_ApplyRawFrame(bands, loudness, peak, bass, deltaTime)
+	AudioController:_ApplyRawFrame(bands, loudness, peak, bass, deltaTime)
 end
 
 local function scheduleAssetReadinessCheck(readReady: () -> boolean)
@@ -255,7 +245,7 @@ local function scheduleAssetReadinessCheck(readReady: () -> boolean)
 				return
 			end
 
-			if readReady() or currentFrame.peak > 0.03 then
+			if readReady() or currentFrame.peak > 0.025 then
 				return
 			end
 		end
@@ -263,7 +253,7 @@ local function scheduleAssetReadinessCheck(readReady: () -> boolean)
 		if mode == "Asset" then
 			stopAudioGraph()
 			mode = "Demo"
-			setStatus("Asset unavailable - using demo pulse")
+			setStatus("Asset unavailable - using demo signal")
 		end
 	end)
 
@@ -277,8 +267,10 @@ local function tryModularAsset(assetId: string): boolean
 		local audioPlayer = Instance.new("AudioPlayer")
 		audioPlayer.Name = "AssetAudioPlayer"
 		audioPlayer.Looping = true
-		audioPlayer.Volume = 0.65
-		(audioPlayer :: any).AutoLoad = true
+		audioPlayer.Volume = 0.55
+		pcall(function()
+			(audioPlayer :: any).AutoLoad = true
+		end)
 		assert(setAudioPlayerContent(audioPlayer, assetId), "AudioPlayer content property unavailable")
 		audioPlayer.Parent = folder
 
@@ -289,15 +281,21 @@ local function tryModularAsset(assetId: string): boolean
 		end)
 		analyzer.Parent = folder
 
-		local output = Instance.new("AudioDeviceOutput")
-		output.Name = "LocalAudioOutput"
-		pcall(function()
-			output.Player = LocalPlayer
-		end)
-		output.Parent = folder
-
 		createWire(folder, audioPlayer, analyzer)
-		createWire(folder, audioPlayer, output)
+
+		local outputOk, output = pcall(function()
+			return Instance.new("AudioDeviceOutput")
+		end)
+		if outputOk and output ~= nil then
+			output.Name = "LocalAudioOutput"
+			pcall(function()
+				(output :: any).Player = LocalPlayer
+			end)
+			output.Parent = folder
+			pcall(function()
+				createWire(folder, audioPlayer, output)
+			end)
+		end
 
 		assetAnalyzer = analyzer
 		audioPlayer:Play()
@@ -306,14 +304,12 @@ local function tryModularAsset(assetId: string): boolean
 			local readyOk, ready = pcall(function()
 				return audioPlayer.IsReady
 			end)
-
 			return readyOk and ready == true
 		end)
 	end)
 
 	if not ok then
-		audioMaid:Cleanup()
-		assetAnalyzer = nil
+		stopAudioGraph()
 		return false
 	end
 
@@ -328,7 +324,7 @@ local function tryClassicSound(assetId: string): boolean
 		sound.Name = "ClassicAssetSound"
 		sound.SoundId = `rbxassetid://{assetId}`
 		sound.Looped = true
-		sound.Volume = 0.65
+		sound.Volume = 0.55
 		sound.Parent = folder
 		sound:Play()
 		classicSound = sound
@@ -339,8 +335,7 @@ local function tryClassicSound(assetId: string): boolean
 	end)
 
 	if not ok then
-		audioMaid:Cleanup()
-		classicSound = nil
+		stopAudioGraph()
 		return false
 	end
 
@@ -370,8 +365,7 @@ local function tryMicInput(): boolean
 	end)
 
 	if not ok then
-		audioMaid:Cleanup()
-		micAnalyzer = nil
+		stopAudioGraph()
 		return false
 	end
 
@@ -380,7 +374,7 @@ local function tryMicInput(): boolean
 		if mode == "Mic" and currentFrame.peak <= 0.01 and currentFrame.rms <= 0.01 then
 			stopAudioGraph()
 			mode = "Demo"
-			setStatus("Mic unavailable - using demo pulse")
+			setStatus("Mic unavailable - using demo signal")
 		end
 	end)
 	audioMaid:Give(thread)
@@ -388,28 +382,27 @@ local function tryMicInput(): boolean
 	return true
 end
 
-function AudioInputController:_ApplyRawFrame(rawBands: BandArray, rawRms: number, rawPeak: number, rawBass: number, deltaTime: number)
+function AudioController:_ApplyRawFrame(rawBands: { number }, rawRms: number, rawPeak: number, rawBass: number, deltaTime: number)
 	local now = os.clock()
-	local attack = if rawPeak > currentFrame.peak then 20 else 7
-	local release = if rawRms > currentFrame.rms then 18 else 5
+	local attack = if rawPeak > currentFrame.peak then 18 else 6
+	local release = if rawRms > currentFrame.rms then 15 else 4
 
-	for index = 1, Constants.FIELD_BAND_COUNT do
+	for index = 1, Constants.VISUAL_BAND_COUNT do
 		local target = math.clamp(rawBands[index] or 0, 0, 1)
 		local current = smoothedBands[index] or 0
 		local speed = if target > current then attack else release
-		smoothedBands[index] = NumberUtil.expSmoothing(current, target, deltaTime, speed)
+		smoothedBands[index] = NumberUtil.expSmooth(current, target, deltaTime, speed)
 	end
 
-	local rms = NumberUtil.expSmoothing(currentFrame.rms, math.clamp(rawRms, 0, 1), deltaTime, release)
-	local peak = NumberUtil.expSmoothing(currentFrame.peak, math.clamp(rawPeak, 0, 1), deltaTime, attack)
-	local bass = NumberUtil.expSmoothing(currentFrame.bass, math.clamp(rawBass, 0, 1), deltaTime, attack)
+	local rms = NumberUtil.expSmooth(currentFrame.rms, math.clamp(rawRms, 0, 1), deltaTime, release)
+	local peak = NumberUtil.expSmooth(currentFrame.peak, math.clamp(rawPeak, 0, 1), deltaTime, attack)
+	local bass = NumberUtil.expSmooth(currentFrame.bass, math.clamp(rawBass, 0, 1), deltaTime, attack)
 
-	rollingEnergy = NumberUtil.expSmoothing(rollingEnergy, rms, deltaTime, 1.6)
+	rollingEnergy = NumberUtil.expSmooth(rollingEnergy, rms, deltaTime, 1.4)
 
-	local beatThreshold = math.max(0.22, rollingEnergy + 0.16)
-	local beatCooldown = 0.21
 	local beat = false
-	if (peak > beatThreshold or bass > beatThreshold + 0.08) and now - lastBeatTime >= beatCooldown then
+	local threshold = math.max(0.2, rollingEnergy + 0.15)
+	if (peak > threshold or bass > threshold + 0.08) and now - lastBeatTime > 0.22 then
 		beat = true
 		lastBeatTime = now
 	end
@@ -426,33 +419,33 @@ function AudioInputController:_ApplyRawFrame(rawBands: BandArray, rawRms: number
 	notifyFrameChanged()
 end
 
-function AudioInputController:_GenerateDemoFrame(deltaTime: number)
+function AudioController:_GenerateDemoFrame(deltaTime: number)
 	demoTime += deltaTime
 
 	local t = demoTime
-	local bands = table.create(Constants.FIELD_BAND_COUNT, 0)
-	local beatWave = (math.sin(t * math.pi * 2 * 1.35) + 1) * 0.5
-	local bassPulse = math.clamp((beatWave - 0.68) / 0.32, 0, 1)
-	local basePulse = (math.sin(t * math.pi * 2 * 0.42) + 1) * 0.5
+	local bands = table.create(Constants.VISUAL_BAND_COUNT, 0)
+	local kickWave = (math.sin(t * math.pi * 2 * 1.08) + 1) * 0.5
+	local kick = math.clamp((kickWave - 0.72) / 0.28, 0, 1)
+	local bassWave = (math.sin(t * math.pi * 2 * 0.27) + 1) * 0.5
+	local breath = (math.sin(t * math.pi * 2 * 0.08) + 1) * 0.5
 
-	for index = 1, Constants.FIELD_BAND_COUNT do
-		local bandAlpha = (index - 1) / Constants.FIELD_BAND_COUNT
-		local noise = (math.noise(t * 0.9, bandAlpha * 4.5, 0.25) + 1) * 0.5
-		local ripple = (math.sin(t * 5.5 + bandAlpha * math.pi * 7.5) + 1) * 0.5
-		local bassWeight = math.max(0, 1 - bandAlpha * 2.5)
-		local trebleSpark = ripple * noise * bandAlpha * 0.42
-		local value = 0.08 + basePulse * 0.2 + bassPulse * bassWeight * 0.75 + trebleSpark
+	for index = 1, Constants.VISUAL_BAND_COUNT do
+		local alpha = (index - 1) / Constants.VISUAL_BAND_COUNT
+		local noise = (math.noise(t * 0.55, alpha * 3.8, 0.1) + 1) * 0.5
+		local ripple = (math.sin(t * 3.6 + alpha * math.pi * 4.2) + 1) * 0.5
+		local bassWeight = math.max(0, 1 - alpha * 2.6)
+		local value = 0.07 + breath * 0.1 + bassWave * 0.16 + kick * bassWeight * 0.62 + ripple * noise * 0.18
 		bands[index] = math.clamp(value * sensitivity, 0, 1)
 	end
 
-	local rms = math.clamp(0.15 + basePulse * 0.22 + bassPulse * 0.5, 0, 1)
-	local peak = math.clamp(rms + bassPulse * 0.28 + bands[Constants.FIELD_BAND_COUNT] * 0.12, 0, 1)
+	local rms = math.clamp(0.12 + breath * 0.08 + bassWave * 0.16 + kick * 0.34, 0, 1)
+	local peak = math.clamp(rms + kick * 0.28 + bands[Constants.VISUAL_BAND_COUNT] * 0.06, 0, 1)
 	local bass = math.clamp((bands[1] + bands[2] + bands[3] + bands[4]) / 4, 0, 1)
 
 	self:_ApplyRawFrame(bands, rms, peak, bass, deltaTime)
 end
 
-function AudioInputController:Init(_context: any)
+function AudioController:Init(_context: any)
 	if initialized then
 		return
 	end
@@ -460,14 +453,14 @@ function AudioInputController:Init(_context: any)
 	initialized = true
 end
 
-function AudioInputController:Start()
+function AudioController:Start()
 	if started then
 		return
 	end
 
 	started = true
 	mode = "Demo"
-	setStatus("Demo pulse active")
+	setStatus("Demo signal active")
 
 	maid:Give(getRenderSignal():Connect(function(deltaTime: number)
 		if mode == "Demo" then
@@ -490,27 +483,27 @@ function AudioInputController:Start()
 	end))
 end
 
-function AudioInputController:SetMode(nextMode: AudioMode)
+function AudioController:SetMode(nextMode: AudioMode)
 	if nextMode == "Demo" then
 		stopAudioGraph()
 		mode = "Demo"
-		setStatus("Demo pulse active")
+		setStatus("Demo signal active")
 	elseif nextMode == "Asset" then
 		setStatus("Enter an audio asset id")
 	elseif nextMode == "Mic" then
 		stopAudioGraph()
-		setStatus("Trying mic input...")
+		setStatus("Trying mic input")
 		if tryMicInput() then
 			mode = "Mic"
 			setStatus("Mic mode active")
 		else
 			mode = "Demo"
-			setStatus("Mic unavailable - using demo pulse")
+			setStatus("Mic unavailable - using demo signal")
 		end
 	end
 end
 
-function AudioInputController:PlayAsset(assetIdText: string)
+function AudioController:PlayAsset(assetIdText: string)
 	local assetId = sanitizeAssetId(assetIdText)
 	if assetId == nil then
 		stopAudioGraph()
@@ -519,7 +512,7 @@ function AudioInputController:PlayAsset(assetIdText: string)
 		return
 	end
 
-	setStatus("Trying asset audio...")
+	setStatus("Trying asset audio")
 
 	if tryModularAsset(assetId) or tryClassicSound(assetId) then
 		mode = "Asset"
@@ -527,42 +520,42 @@ function AudioInputController:PlayAsset(assetIdText: string)
 	else
 		stopAudioGraph()
 		mode = "Demo"
-		setStatus("Asset unavailable - using demo pulse")
+		setStatus("Asset unavailable - using demo signal")
 	end
 end
 
-function AudioInputController:Stop()
+function AudioController:Stop()
 	stopAudioGraph()
 	mode = "Demo"
-	setStatus("Demo pulse active")
+	setStatus("Demo signal active")
 end
 
-function AudioInputController:SetSensitivity(value: number)
+function AudioController:SetSensitivity(value: number)
 	local cleanValue = NumberUtil.sanitizeFiniteNumber(value, Constants.DEFAULT_SENSITIVITY)
 	sensitivity = math.clamp(cleanValue, 0.25, 3)
 end
 
-function AudioInputController:GetSensitivity(): number
+function AudioController:GetSensitivity(): number
 	return sensitivity
 end
 
-function AudioInputController:GetFrame(): AudioFrame
+function AudioController:GetFrame(): AudioFrame
 	return currentFrame
 end
 
-function AudioInputController:GetMode(): AudioMode
+function AudioController:GetMode(): AudioMode
 	return mode
 end
 
-function AudioInputController:GetStatus(): string
+function AudioController:GetStatus(): string
 	return status
 end
 
-function AudioInputController:SetStatus(nextStatus: string)
+function AudioController:SetStatus(nextStatus: string)
 	setStatus(nextStatus)
 end
 
-function AudioInputController:OnFrameChanged(callback: (AudioFrame) -> ()): () -> ()
+function AudioController:OnFrameChanged(callback: (AudioFrame) -> ()): () -> ()
 	table.insert(callbacks, callback)
 	local connected = true
 
@@ -581,9 +574,9 @@ function AudioInputController:OnFrameChanged(callback: (AudioFrame) -> ()): () -
 	end
 end
 
-function AudioInputController:Destroy()
+function AudioController:Destroy()
 	maid:Cleanup()
 	audioMaid:Cleanup()
 end
 
-return AudioInputController
+return AudioController

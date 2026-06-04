@@ -17,18 +17,20 @@ local initialized = false
 local started = false
 local context: any = nil
 local maid = Maid.new()
-local fieldPulseRemote: RemoteEvent? = nil
-local lastPulseRequest = 0
+local marbleRemote: RemoteEvent? = nil
+local lastMarbleRequest = 0
 
-local ACTION_PULSE = "ResonanceSendPulse"
-local ACTION_PULSE_SPACE = "ResonanceSendPulseSpace"
-local ACTION_PRESET = "ResonanceCyclePreset"
-local ACTION_MIC = "ResonanceTryMic"
+local ACTION_TOGGLE_UI = "ResonanceToggleUi"
 local ACTION_DEMO = "ResonanceDemoMode"
+local ACTION_MIC = "ResonanceMicMode"
+local ACTION_ASSET = "ResonanceAssetMode"
+local ACTION_STYLE = "ResonanceCycleStyle"
+local ACTION_MARBLE = "ResonanceDropMarble"
+local ACTION_CAMERA = "ResonanceResetCamera"
 
 local function getRemote(): RemoteEvent?
-	if fieldPulseRemote ~= nil then
-		return fieldPulseRemote
+	if marbleRemote ~= nil then
+		return marbleRemote
 	end
 
 	local remotesFolder = ReplicatedStorage:WaitForChild(Constants.REMOTES_FOLDER_NAME, 10)
@@ -36,18 +38,18 @@ local function getRemote(): RemoteEvent?
 		return nil
 	end
 
-	local remote = remotesFolder:WaitForChild(RemoteNames.FieldPulseRequested, 10)
+	local remote = remotesFolder:WaitForChild(RemoteNames.MarbleRequested, 10)
 	if remote ~= nil and remote:IsA("RemoteEvent") then
-		fieldPulseRemote = remote
+		marbleRemote = remote
 		return remote
 	end
 
 	return nil
 end
 
-local function currentIntensity(): number
-	local frame = context.AudioInputController:GetFrame()
-	return math.clamp(math.max(frame.rms, frame.peak, frame.bass) * 1.05, 0, 1)
+local function currentEnergy(): number
+	local frame = context.AudioController:GetFrame()
+	return math.clamp(math.max(frame.peak, frame.bass, frame.rms) * 1.05, 0, 1)
 end
 
 function InputController:Init(nextContext: any)
@@ -65,101 +67,81 @@ function InputController:Start()
 	end
 
 	started = true
-	fieldPulseRemote = getRemote()
+	marbleRemote = getRemote()
 
-	local function handlePulse(_actionName: string, inputState: Enum.UserInputState, _inputObject: InputObject): Enum.ContextActionResult
-		if inputState == Enum.UserInputState.Begin then
-			self:RequestFieldPulse()
-		end
+	local function bind(actionName: string, keyCode: Enum.KeyCode, handler: () -> (), result: Enum.ContextActionResult?)
+		ContextActionService:BindAction(actionName, function(_name: string, inputState: Enum.UserInputState, inputObject: InputObject): Enum.ContextActionResult
+			if inputState == Enum.UserInputState.Begin and inputObject.UserInputState == Enum.UserInputState.Begin then
+				handler()
+			end
 
-		return Enum.ContextActionResult.Sink
+			return result or Enum.ContextActionResult.Sink
+		end, false, keyCode)
 	end
 
-	local function handleSpace(_actionName: string, inputState: Enum.UserInputState, _inputObject: InputObject): Enum.ContextActionResult
-		if inputState == Enum.UserInputState.Begin then
-			self:RequestFieldPulse()
-		end
-
-		return Enum.ContextActionResult.Pass
-	end
-
-	local function handlePreset(_actionName: string, inputState: Enum.UserInputState, _inputObject: InputObject): Enum.ContextActionResult
-		if inputState == Enum.UserInputState.Begin then
-			context.VisualizerController:CyclePreset()
-			local text = `Preset: {context.VisualizerController:GetPreset()}`
-			context.UIController:SetStatus(text)
-			context.EffectsController:PlayToast(text)
-		end
-
-		return Enum.ContextActionResult.Sink
-	end
-
-	local function handleMic(_actionName: string, inputState: Enum.UserInputState, _inputObject: InputObject): Enum.ContextActionResult
-		if inputState == Enum.UserInputState.Begin then
-			context.AudioInputController:SetMode("Mic")
-			local text = context.AudioInputController:GetStatus()
-			context.UIController:SetStatus(text)
-			context.EffectsController:PlayToast(text)
-		end
-
-		return Enum.ContextActionResult.Sink
-	end
-
-	local function handleDemo(_actionName: string, inputState: Enum.UserInputState, _inputObject: InputObject): Enum.ContextActionResult
-		if inputState == Enum.UserInputState.Begin then
-			context.AudioInputController:SetMode("Demo")
-			context.UIController:SetStatus("Demo pulse active")
-			context.EffectsController:PlayToast("Demo pulse active")
-		end
-
-		return Enum.ContextActionResult.Sink
-	end
-
-	ContextActionService:BindAction(ACTION_PULSE, handlePulse, false, Enum.KeyCode.E)
-	ContextActionService:BindAction(ACTION_PULSE_SPACE, handleSpace, false, Enum.KeyCode.Space)
-	ContextActionService:BindAction(ACTION_PRESET, handlePreset, false, Enum.KeyCode.B)
-	ContextActionService:BindAction(ACTION_MIC, handleMic, false, Enum.KeyCode.M)
-	ContextActionService:BindAction(ACTION_DEMO, handleDemo, false, Enum.KeyCode.N)
+	bind(ACTION_TOGGLE_UI, Enum.KeyCode.H, function()
+		context.UIController:ToggleVisible()
+	end)
+	bind(ACTION_DEMO, Enum.KeyCode.D, function()
+		context.AudioController:SetMode("Demo")
+		context.UIController:SetStatus("Demo signal active")
+	end)
+	bind(ACTION_MIC, Enum.KeyCode.M, function()
+		context.AudioController:SetMode("Mic")
+		context.UIController:SetStatus(context.AudioController:GetStatus())
+	end)
+	bind(ACTION_ASSET, Enum.KeyCode.A, function()
+		context.UIController:PlayAsset()
+	end)
+	bind(ACTION_STYLE, Enum.KeyCode.V, function()
+		context.ResonanceController:CycleStyle()
+		context.UIController:SetStatus(`Style {context.ResonanceController:GetStyle()}`)
+	end)
+	bind(ACTION_MARBLE, Enum.KeyCode.E, function()
+		self:RequestMarble()
+	end)
+	bind(ACTION_CAMERA, Enum.KeyCode.R, function()
+		context.CameraController:Reset()
+		context.UIController:SetStatus("Camera reset")
+	end)
 
 	maid:Give(function()
-		ContextActionService:UnbindAction(ACTION_PULSE)
-		ContextActionService:UnbindAction(ACTION_PULSE_SPACE)
-		ContextActionService:UnbindAction(ACTION_PRESET)
-		ContextActionService:UnbindAction(ACTION_MIC)
+		ContextActionService:UnbindAction(ACTION_TOGGLE_UI)
 		ContextActionService:UnbindAction(ACTION_DEMO)
+		ContextActionService:UnbindAction(ACTION_MIC)
+		ContextActionService:UnbindAction(ACTION_ASSET)
+		ContextActionService:UnbindAction(ACTION_STYLE)
+		ContextActionService:UnbindAction(ACTION_MARBLE)
+		ContextActionService:UnbindAction(ACTION_CAMERA)
 	end)
 end
 
-function InputController:RequestFieldPulse()
+function InputController:RequestMarble()
 	local now = os.clock()
-	if now - lastPulseRequest < Constants.FIELD_PULSE_COOLDOWN then
-		context.UIController:SetStatus("Pulse limited")
-		context.EffectsController:PlayToast("Pulse limited")
+	if now - lastMarbleRequest < Constants.MARBLE_COOLDOWN then
+		context.UIController:SetStatus("Marble limited")
 		return
 	end
 
 	local remote = getRemote()
 	if remote == nil then
-		context.UIController:SetStatus("Pulse remote unavailable")
-		context.EffectsController:PlayToast("Pulse remote unavailable")
+		context.UIController:SetStatus("Marble remote unavailable")
 		return
 	end
 
-	lastPulseRequest = now
-	local intensity = math.clamp(NumberUtil.sanitizeFiniteNumber(currentIntensity(), 0), 0, 1)
+	lastMarbleRequest = now
+	local energy = math.clamp(NumberUtil.sanitizeFiniteNumber(currentEnergy(), 0), 0, 1)
 	local ok = pcall(function()
 		remote:FireServer({
-			intensity = intensity,
+			energy = energy,
 		})
 	end)
 
 	if ok then
-		context.UIController:SetStatus("Pulse sent")
-		context.EffectsController:PulseBeat(math.max(intensity, 0.28))
-		context.EffectsController:PlayToast("Pulse sent")
+		context.UIController:SetStatus("Marble dropped")
+		context.UIController:PulseGlow(math.max(energy, 0.25))
 	else
-		context.UIController:SetStatus("Pulse request failed")
-		context.EffectsController:PlayToast("Pulse request failed")
+		context.UIController:SetStatus("Marble request failed")
 	end
 end
 
