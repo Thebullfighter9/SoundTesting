@@ -1,0 +1,36 @@
+# OS/editor files
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Roblox Studio and Rojo output
+*.rbxl
+*.rbxlx
+*.rbxm
+*.rbxmx
+*.place
+build/
+dist/
+out/
+
+# Logs and temp files
+*.log
+tmp/
+temp/
+.cache/
+
+# Local secrets/auth/config
+.env
+.env.*
+*.pem
+*.key
+*.p12
+*.pfx
+.mcp/
+.codex/
+auth/
+secrets/
