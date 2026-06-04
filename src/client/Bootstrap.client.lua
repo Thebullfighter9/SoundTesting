@@ -6,14 +6,12 @@ local AudioController = require((ControllersFolder:WaitForChild("AudioController
 local ResonanceController = require((ControllersFolder:WaitForChild("ResonanceController") :: ModuleScript))
 local CameraController = require((ControllersFolder:WaitForChild("CameraController") :: ModuleScript))
 local UIController = require((ControllersFolder:WaitForChild("UIController") :: ModuleScript))
-local InputController = require((ControllersFolder:WaitForChild("InputController") :: ModuleScript))
 
 local controllers = {
 	AudioController,
 	ResonanceController,
 	CameraController,
 	UIController,
-	InputController,
 }
 
 local context = {
@@ -21,7 +19,6 @@ local context = {
 	ResonanceController = ResonanceController,
 	CameraController = CameraController,
 	UIController = UIController,
-	InputController = InputController,
 }
 
 for _, controller in ipairs(controllers) do

@@ -24,12 +24,13 @@ local maid = Maid.new()
 local audioMaid = Maid.new()
 local callbacks: { (AudioFrame) -> () } = {}
 
-local mode: AudioMode = "Demo"
-local status = "Demo signal active"
+local mode: AudioMode = Constants.DEFAULT_AUDIO_MODE :: AudioMode
+local status = "Base song ready"
 local sensitivity = Constants.DEFAULT_SENSITIVITY
 local demoTime = 0
 local rollingEnergy = 0.12
 local lastBeatTime = 0
+local audioAttemptSerial = 0
 local assetAnalyzer: AudioAnalyzer? = nil
 local micAnalyzer: AudioAnalyzer? = nil
 local classicSound: Sound? = nil
@@ -55,6 +56,15 @@ end
 
 local function setStatus(nextStatus: string)
 	status = nextStatus
+end
+
+local function nextAudioAttempt(): number
+	audioAttemptSerial += 1
+	return audioAttemptSerial
+end
+
+local function isCurrentAttempt(attemptId: number): boolean
+	return attemptId == audioAttemptSerial
 end
 
 local function notifyFrameChanged()
@@ -237,11 +247,11 @@ local function readClassicSoundFrame(sound: Sound, deltaTime: number)
 	AudioController:_ApplyRawFrame(bands, loudness, peak, bass, deltaTime)
 end
 
-local function scheduleAssetReadinessCheck(readReady: () -> boolean)
+local function scheduleAssetReadinessCheck(readReady: () -> boolean, unavailableStatus: string, attemptId: number)
 	local thread = task.spawn(function()
 		for _ = 1, 4 do
 			task.wait(0.75)
-			if mode ~= "Asset" then
+			if mode ~= "Asset" or not isCurrentAttempt(attemptId) then
 				return
 			end
 
@@ -250,17 +260,17 @@ local function scheduleAssetReadinessCheck(readReady: () -> boolean)
 			end
 		end
 
-		if mode == "Asset" then
+		if mode == "Asset" and isCurrentAttempt(attemptId) then
 			stopAudioGraph()
 			mode = "Demo"
-			setStatus("Asset unavailable - using demo signal")
+			setStatus(unavailableStatus)
 		end
 	end)
 
 	audioMaid:Give(thread)
 end
 
-local function tryModularAsset(assetId: string): boolean
+local function tryModularAsset(assetId: string, unavailableStatus: string, attemptId: number): boolean
 	local folder = createAudioFolder()
 
 	local ok = pcall(function()
@@ -305,7 +315,7 @@ local function tryModularAsset(assetId: string): boolean
 				return audioPlayer.IsReady
 			end)
 			return readyOk and ready == true
-		end)
+		end, unavailableStatus, attemptId)
 	end)
 
 	if not ok then
@@ -316,7 +326,7 @@ local function tryModularAsset(assetId: string): boolean
 	return true
 end
 
-local function tryClassicSound(assetId: string): boolean
+local function tryClassicSound(assetId: string, unavailableStatus: string, attemptId: number): boolean
 	local folder = createAudioFolder()
 
 	local ok = pcall(function()
@@ -331,7 +341,7 @@ local function tryClassicSound(assetId: string): boolean
 
 		scheduleAssetReadinessCheck(function(): boolean
 			return sound.IsLoaded
-		end)
+		end, unavailableStatus, attemptId)
 	end)
 
 	if not ok then
@@ -342,7 +352,37 @@ local function tryClassicSound(assetId: string): boolean
 	return true
 end
 
-local function tryMicInput(): boolean
+local function playAssetWithStatus(
+	assetIdText: string,
+	tryingStatus: string,
+	readyStatus: string,
+	unavailableStatus: string,
+	invalidStatus: string
+): boolean
+	local assetId = sanitizeAssetId(assetIdText)
+	if assetId == nil then
+		stopAudioGraph()
+		mode = "Demo"
+		setStatus(invalidStatus)
+		return false
+	end
+
+	setStatus(tryingStatus)
+	local attemptId = nextAudioAttempt()
+
+	if tryModularAsset(assetId, unavailableStatus, attemptId) or tryClassicSound(assetId, unavailableStatus, attemptId) then
+		mode = "Asset"
+		setStatus(readyStatus)
+		return true
+	end
+
+	stopAudioGraph()
+	mode = "Demo"
+	setStatus(unavailableStatus)
+	return false
+end
+
+local function tryMicInput(attemptId: number): boolean
 	local folder = createAudioFolder()
 
 	local ok = pcall(function()
@@ -371,7 +411,7 @@ local function tryMicInput(): boolean
 
 	local thread = task.spawn(function()
 		task.wait(2.5)
-		if mode == "Mic" and currentFrame.peak <= 0.01 and currentFrame.rms <= 0.01 then
+		if mode == "Mic" and isCurrentAttempt(attemptId) and currentFrame.peak <= 0.01 and currentFrame.rms <= 0.01 then
 			stopAudioGraph()
 			mode = "Demo"
 			setStatus("Mic unavailable - using demo signal")
@@ -459,8 +499,6 @@ function AudioController:Start()
 	end
 
 	started = true
-	mode = "Demo"
-	setStatus("Demo signal active")
 
 	maid:Give(getRenderSignal():Connect(function(deltaTime: number)
 		if mode == "Demo" then
@@ -481,19 +519,27 @@ function AudioController:Start()
 			end
 		end
 	end))
+
+	if Constants.DEFAULT_AUDIO_MODE == "Asset" then
+		self:PlayBaseSong()
+	else
+		self:SetMode("Demo")
+	end
 end
 
 function AudioController:SetMode(nextMode: AudioMode)
 	if nextMode == "Demo" then
+		nextAudioAttempt()
 		stopAudioGraph()
 		mode = "Demo"
 		setStatus("Demo signal active")
 	elseif nextMode == "Asset" then
 		setStatus("Enter an audio asset id")
 	elseif nextMode == "Mic" then
+		local attemptId = nextAudioAttempt()
 		stopAudioGraph()
 		setStatus("Trying mic input")
-		if tryMicInput() then
+		if tryMicInput(attemptId) then
 			mode = "Mic"
 			setStatus("Mic mode active")
 		else
@@ -504,27 +550,27 @@ function AudioController:SetMode(nextMode: AudioMode)
 end
 
 function AudioController:PlayAsset(assetIdText: string)
-	local assetId = sanitizeAssetId(assetIdText)
-	if assetId == nil then
-		stopAudioGraph()
-		mode = "Demo"
-		setStatus("Invalid asset ID")
-		return
-	end
+	playAssetWithStatus(
+		assetIdText,
+		"Trying asset audio",
+		"Asset loaded",
+		"Asset unavailable - using demo signal",
+		"Invalid asset ID"
+	)
+end
 
-	setStatus("Trying asset audio")
-
-	if tryModularAsset(assetId) or tryClassicSound(assetId) then
-		mode = "Asset"
-		setStatus("Asset loaded")
-	else
-		stopAudioGraph()
-		mode = "Demo"
-		setStatus("Asset unavailable - using demo signal")
-	end
+function AudioController:PlayBaseSong(): boolean
+	return playAssetWithStatus(
+		Constants.DEFAULT_AUDIO_ASSET_ID,
+		"Loading base song",
+		"Playing base song",
+		"Base song unavailable - using demo signal",
+		"Base song unavailable - using demo signal"
+	)
 end
 
 function AudioController:Stop()
+	nextAudioAttempt()
 	stopAudioGraph()
 	mode = "Demo"
 	setStatus("Demo signal active")

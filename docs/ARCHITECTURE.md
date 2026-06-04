@@ -1,6 +1,6 @@
 # Architecture
 
-ArrayWave Visualizer uses a Rojo layout with a clear server/client/shared split.
+ArrayWave uses a Rojo layout with a clear server/client/shared split.
 
 ```text
 src/shared -> ReplicatedStorage/Shared
@@ -22,15 +22,15 @@ Server modules own replicated state:
 
 ## Client
 
-Client controllers own presentation and input:
+Client controllers own presentation and UI-only controls:
 
 - `AudioController` produces audio frames in Demo, Asset, or Mic mode.
 - `ResonanceController` creates and updates the local-only ArrayWave visualizer under `Workspace/ArrayWaveClientVisuals`.
 - Visual child folders are `GridArray`, `RowBars`, `RadialCircle`, `Shockwaves`, and `DebugMarkers`.
 - The visualizer pools 21x21 grid tiles, 64 row bars, 96 radial bars, and six reusable shockwave rings.
 - `CameraController` frames the sculpture and applies clamped FOV feedback.
-- `UIController` builds the compact generated UI.
-- `InputController` binds keys and sends narrow marble requests.
+- `UIController` builds the compact generated UI, owns all project controls, and sends optional marble requests.
+- The project does not bind keyboard shortcuts for audio, visualizer, marble, camera, or UI actions.
 
 ## Audio Boundary
 

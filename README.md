@@ -1,34 +1,36 @@
-# SoundTesting: ArrayWave Visualizer
+# SoundTesting: ArrayWave
 
-ArrayWave Visualizer is a focused Roblox Luau audio visualizer demo. Demo, asset, or microphone analyzer data drives three clear client-local visual forms: a dense grid array, a classic row of bars, and a radial circle with expanding sound waves.
+ArrayWave is a focused Roblox Luau audio visualizer. The default base song is Roblox audio asset `9043887091`; if that asset is unavailable to the experience, the client falls back to a synthetic Demo signal so the visualizer still moves immediately.
 
-It exists as a scripting portfolio piece. There are no rounds, quests, NPCs, coins, XP, lore systems, monetization, or DataStores.
+The visualizer is the product. There are no rounds, quests, NPCs, coins, XP, lore systems, monetization, or DataStores.
 
 ## Controls
 
-- `H`: hide or show UI
-- `D`: Demo mode
-- `M`: try Mic mode
-- `A`: play the current asset ID
-- `V`: cycle visualizer mode
-- `1`: Grid mode
-- `2`: Row mode
-- `3`: Circle mode
-- `4`: All mode
-- `5`: Minimal mode
-- `E`: drop a server-validated resonance marble
-- `R`: reset camera framing
+All project controls are UI-only through the small `ArrayWave` dock. The dock includes:
+
+- Play Base
+- Demo
+- Mic
+- Asset ID field, prefilled with `9043887091`
+- Play Asset
+- Stop
+- Visual modes: Grid, Row, Circle, All, Minimal
+- Sensitivity and intensity adjustment
+- Pulse Test
+- Drop Marble when the marble remote is available
+
+No project keyboard shortcuts are used.
 
 ## Features
 
-- Demo mode animates immediately and needs no external assets.
+- Base song attempts to play automatically on startup.
+- Demo mode remains the reliable fallback for unavailable or private audio.
 - Asset mode attempts a modular Roblox audio graph, then falls back to local `Sound` loudness.
 - Mic mode attempts modular microphone analysis and falls back cleanly if unavailable.
 - Visualizer modes: Grid, Row, Circle, All, Minimal.
 - Server-built matte gallery environment with a 17x17 anchor grid.
 - Local-only 21x21 grid array, 64 row bars, 96 radial circle bars, and pooled shockwaves.
-- One narrow client-to-server remote for rate-limited marble spawning.
-- Generated UI kept small, bottom-left, and secondary to the sculpture.
+- One narrow client-to-server remote for optional, rate-limited marble spawning.
 
 ## Systems Demonstrated
 
@@ -39,7 +41,7 @@ It exists as a scripting portfolio piece. There are no rounds, quests, NPCs, coi
 - Local audio analysis with privacy-preserving networking.
 - Server-side remote validation and rate limiting.
 - Pooled visualizer parts with no per-frame allocation.
-- Maid-style cleanup helpers.
+- Compact generated UI that uses `Activated` for mouse, touch, and gamepad activation.
 
 ## Run With Rojo
 
@@ -47,7 +49,11 @@ It exists as a scripting portfolio piece. There are no rounds, quests, NPCs, coi
 rojo serve default.project.json
 ```
 
-Connect Roblox Studio to the Rojo server and press Play.
+Connect Roblox Studio to the Rojo server and start a play session.
+
+## Base Song
+
+The default asset ID is `9043887091`. Roblox audio permission rules may prevent an asset from loading in a given experience. If the base song cannot be played or analyzed, the UI reports the fallback and Demo mode starts without errors.
 
 ## Demo Mode
 
@@ -55,14 +61,14 @@ Demo mode generates a synthetic audio frame every render step. It creates changi
 
 ## Asset Mode
 
-Paste a numeric Roblox audio asset ID and press `Play`, or press `A`. The client first attempts:
+Paste a numeric Roblox audio asset ID and use the UI `Play Asset` button. The client first attempts:
 
 - `AudioPlayer`
 - `AudioAnalyzer`
 - `AudioDeviceOutput`
 - `Wire`
 
-If modular audio is unavailable, it tries a local `Sound` and reads `PlaybackLoudness`. Invalid or private assets fall back without crashing.
+If modular audio is unavailable, it tries a local `Sound` and reads `PlaybackLoudness`. Invalid, private, or blocked assets fall back without crashing.
 
 ## Mic Mode
 
@@ -89,6 +95,4 @@ Audio frames, microphone state, spectrum data, RMS, peak, bass, and beat values 
 
 ## Performance Notes
 
-The visualizer instances are created once under `Workspace/ArrayWaveClientVisuals` and updated in place from one render connection. UI readouts are throttled. The server only handles limited marble spawns and cleanup.
-
-## Screenshots
+The visualizer instances are created once under `Workspace/ArrayWaveClientVisuals` and updated in place from one render connection. The server only handles limited marble spawns and cleanup.

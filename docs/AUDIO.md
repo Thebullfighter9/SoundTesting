@@ -2,9 +2,15 @@
 
 ArrayWave keeps all audio analysis local to the client. Audio frames are presentation data, not server authority.
 
+## Base Song
+
+The default base song is Roblox audio asset `9043887091`. `AudioController` attempts this asset automatically on startup and the UI asset field is prefilled with the same ID.
+
+The controller first attempts modular audio. If the asset is private, blocked for the experience, unavailable, or the audio graph fails, it reports `Base song unavailable - using demo signal` and starts Demo mode without errors.
+
 ## Demo Mode
 
-Demo mode starts immediately. It synthesizes a signal with layered sine waves, a kick-like pulse, slow bass motion, and `math.noise` variation. The controller produces 32 changing bands, RMS, peak, bass, beat, and frame time.
+Demo mode starts immediately whenever fallback is needed. It synthesizes a signal with layered sine waves, a kick-like pulse, slow bass motion, and `math.noise` variation. The controller produces 32 changing bands, RMS, peak, bass, beat, and frame time.
 
 `ResonanceController` also has a fallback band synthesizer. If the audio frame is unavailable or all bands are flat, Grid, Row, and Circle modes still receive useful band values from RMS, peak, bass, and time.
 

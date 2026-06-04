@@ -490,18 +490,6 @@ local function updateShockwaves(deltaTime: number)
 	end
 end
 
-local function updateVisibilityForStyle()
-	local showGrid = style == "Grid" or style == "All" or style == "Minimal"
-	local showRow = style == "Row" or style == "All"
-	local showCircle = style == "Circle" or style == "All" or style == "Minimal"
-	local showShock = style == "Grid" or style == "Circle" or style == "All" or style == "Minimal"
-
-	setFolderVisible(gridFolder, showGrid)
-	setFolderVisible(rowFolder, showRow)
-	setFolderVisible(circleFolder, showCircle)
-	setFolderVisible(shockwaveFolder, showShock)
-end
-
 local function updateVisuals(deltaTime: number)
 	local frame = getSafeFrame()
 	local energy = math.clamp((frame.rms * 0.65 + frame.peak * 0.3 + frame.bass * 0.24) * intensity, 0, 1)
@@ -585,8 +573,12 @@ function ResonanceController:GetStyle(): VisualStyle
 	return style
 end
 
+function ResonanceController:TriggerPulse(strength: number)
+	activateShockwave(strength)
+end
+
 function ResonanceController:TriggerPulseTest()
-	activateShockwave(0.85)
+	self:TriggerPulse(0.85)
 end
 
 function ResonanceController:GetDebugCounts(): { [string]: number }
