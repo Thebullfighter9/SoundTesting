@@ -14,16 +14,15 @@ local LabWorldService = {}
 
 local initialized = false
 local started = false
-local labFolder: Folder? = nil
+local fieldFolder: Folder? = nil
 
-local COLORS = {
-	cyan = Color3.fromRGB(0, 242, 255),
-	blue = Color3.fromRGB(40, 118, 255),
-	pink = Color3.fromRGB(255, 64, 188),
-	purple = Color3.fromRGB(138, 80, 255),
-	dark = Color3.fromRGB(9, 11, 22),
-	black = Color3.fromRGB(2, 3, 8),
-	white = Color3.fromRGB(230, 252, 255),
+local PALETTE = {
+	charcoal = Color3.fromRGB(18, 20, 22),
+	graphite = Color3.fromRGB(34, 38, 40),
+	stone = Color3.fromRGB(68, 72, 72),
+	mist = Color3.fromRGB(172, 198, 198),
+	softCyan = Color3.fromRGB(92, 178, 184),
+	warm = Color3.fromRGB(210, 198, 170),
 }
 
 local function safeSet(instance: Instance, propertyName: string, value: any)
@@ -45,216 +44,191 @@ local function createPart(parent: Instance, name: string, props: { [string]: any
 	return InstanceUtil.create("Part", props, parent) :: BasePart
 end
 
-local function createNeonBlock(parent: Instance, name: string, cframe: CFrame, size: Vector3, color: Color3): BasePart
+local function createCylinder(parent: Instance, name: string, cframe: CFrame, size: Vector3, color: Color3, material: Enum.Material): BasePart
 	return createPart(parent, name, {
-		CFrame = cframe,
+		CFrame = cframe * CFrame.Angles(0, 0, math.rad(90)),
 		Size = size,
 		Color = color,
-		Material = Enum.Material.Neon,
-		CanCollide = true,
-		CanTouch = true,
-		CanQuery = true,
-	})
-end
-
-local function rebuildLighting()
-	for _, effectName in ipairs({ "PulseForgeBloom", "PulseForgeColor", "PulseForgeAtmosphere" }) do
-		local existing = Lighting:FindFirstChild(effectName)
-		if existing ~= nil then
-			existing:Destroy()
-		end
-	end
-
-	local bloom = InstanceUtil.create("BloomEffect", {
-		Name = "PulseForgeBloom",
-		Intensity = 1.2,
-		Size = 24,
-		Threshold = 0.85,
-	}, Lighting)
-
-	local color = InstanceUtil.create("ColorCorrectionEffect", {
-		Name = "PulseForgeColor",
-		Brightness = 0.03,
-		Contrast = 0.18,
-		Saturation = 0.18,
-		TintColor = Color3.fromRGB(220, 245, 255),
-	}, Lighting)
-
-	local atmosphereOk, atmosphere = pcall(function()
-		return Instance.new("Atmosphere")
-	end)
-
-	if atmosphereOk and atmosphere ~= nil then
-		atmosphere.Name = "PulseForgeAtmosphere"
-		safeSet(atmosphere, "Density", 0.35)
-		safeSet(atmosphere, "Color", Color3.fromRGB(115, 175, 255))
-		safeSet(atmosphere, "Decay", Color3.fromRGB(20, 30, 60))
-		atmosphere.Parent = Lighting
-	end
-
-	safeSet(Lighting, "Ambient", Color3.fromRGB(22, 28, 55))
-	safeSet(Lighting, "OutdoorAmbient", Color3.fromRGB(8, 10, 18))
-	safeSet(Lighting, "Brightness", 2)
-	safeSet(Lighting, "ClockTime", 0.1)
-
-	-- Keep references live in strict mode without needing later mutation.
-	if bloom == nil or color == nil then
-		warn("PulseForge lighting effect creation did not complete")
-	end
-end
-
-local function createStage(staticFolder: Folder)
-	local floor = createPart(staticFolder, "StageFloor", {
-		CFrame = CFrame.new(0, 0, 0),
-		Size = Vector3.new(110, 1, 110),
-		Color = COLORS.black,
-		Material = Enum.Material.SmoothPlastic,
-		CanCollide = true,
-		CanTouch = true,
-		CanQuery = true,
-	})
-	tag(floor, "PulseForgeStage")
-
-	local platform = createPart(staticFolder, "RaisedPlatform", {
-		CFrame = CFrame.new(0, 1.1, 0) * CFrame.Angles(0, 0, math.rad(90)),
-		Size = Vector3.new(2, 34, 34),
-		Color = Color3.fromRGB(13, 20, 38),
-		Material = Enum.Material.Metal,
+		Material = material,
 		Shape = Enum.PartType.Cylinder,
 		CanCollide = true,
 		CanTouch = true,
 		CanQuery = true,
 	})
-	tag(platform, "PulseForgeStage")
+end
 
-	createNeonBlock(staticFolder, "EntryRailLeft", CFrame.new(-26, 2.2, -38), Vector3.new(2, 3, 26), COLORS.cyan)
-	createNeonBlock(staticFolder, "EntryRailRight", CFrame.new(26, 2.2, -38), Vector3.new(2, 3, 26), COLORS.pink)
-	createNeonBlock(staticFolder, "BackGlowWall", CFrame.new(0, 6, 47), Vector3.new(86, 11, 2), COLORS.blue)
+local function clearPreviousWorld()
+	for _, folderName in ipairs({ Constants.FIELD_FOLDER_NAME }) do
+		local existing = Workspace:FindFirstChild(folderName)
+		if existing ~= nil then
+			existing:Destroy()
+		end
+	end
 
-	for index = 1, 4 do
-		local sign = if index <= 2 then -1 else 1
-		local offset = if index % 2 == 0 then 18 else 34
-		local rail = createNeonBlock(
-			staticFolder,
-			`SideRail_{index}`,
-			CFrame.new(sign * 51, 2.6, offset),
-			Vector3.new(2, 3.5, 26),
-			if sign < 0 then COLORS.purple else COLORS.cyan
-		)
-		rail.Transparency = 0.1
+	for _, effectName in ipairs({
+		"ResonanceBloom",
+		"ResonanceColor",
+		"ResonanceAtmosphere",
+	}) do
+		local effect = Lighting:FindFirstChild(effectName)
+		if effect ~= nil then
+			effect:Destroy()
+		end
 	end
 end
 
-local function createSpawn(spawnFolder: Folder)
+local function configureLighting()
+	InstanceUtil.create("BloomEffect", {
+		Name = "ResonanceBloom",
+		Intensity = 0.28,
+		Size = 18,
+		Threshold = 1.1,
+	}, Lighting)
+
+	InstanceUtil.create("ColorCorrectionEffect", {
+		Name = "ResonanceColor",
+		Brightness = -0.02,
+		Contrast = 0.08,
+		Saturation = -0.08,
+		TintColor = Color3.fromRGB(232, 238, 232),
+	}, Lighting)
+
+	local ok, atmosphere = pcall(function()
+		return Instance.new("Atmosphere")
+	end)
+
+	if ok and atmosphere ~= nil then
+		atmosphere.Name = "ResonanceAtmosphere"
+		safeSet(atmosphere, "Density", 0.22)
+		safeSet(atmosphere, "Color", Color3.fromRGB(182, 194, 190))
+		safeSet(atmosphere, "Decay", Color3.fromRGB(42, 50, 54))
+		atmosphere.Parent = Lighting
+	end
+
+	safeSet(Lighting, "Ambient", Color3.fromRGB(76, 82, 82))
+	safeSet(Lighting, "OutdoorAmbient", Color3.fromRGB(28, 31, 34))
+	safeSet(Lighting, "Brightness", 1.35)
+	safeSet(Lighting, "ClockTime", 18.25)
+end
+
+local function buildGround(staticFolder: Folder)
+	local floor = createPart(staticFolder, "GalleryFloor", {
+		CFrame = CFrame.new(0, -0.05, 0),
+		Size = Vector3.new(96, 0.25, 96),
+		Color = PALETTE.charcoal,
+		Material = Enum.Material.SmoothPlastic,
+		CanCollide = true,
+		CanTouch = true,
+		CanQuery = true,
+	})
+	tag(floor, "ResonanceStage")
+
+	local plinth = createCylinder(
+		staticFolder,
+		"ListeningPlinth",
+		CFrame.new(0, 0.35, 0),
+		Vector3.new(0.8, 34, 34),
+		PALETTE.graphite,
+		Enum.Material.Metal
+	)
+	tag(plinth, "ResonanceStage")
+
+	local inner = createCylinder(
+		staticFolder,
+		"FieldSurface",
+		CFrame.new(0, 0.86, 0),
+		Vector3.new(0.2, 24, 24),
+		Color3.fromRGB(24, 28, 29),
+		Enum.Material.SmoothPlastic
+	)
+	inner.CanCollide = false
+	inner.CanTouch = false
+	tag(inner, "ResonanceStage")
+
+	for index = 1, 4 do
+		local angle = (index - 1) * math.pi * 0.5 + math.pi * 0.25
+		local radius = 38
+		local marker = createPart(staticFolder, `BoundaryMarker_{index}`, {
+			CFrame = CFrame.new(math.cos(angle) * radius, 1.45, math.sin(angle) * radius) * CFrame.Angles(0, -angle, 0),
+			Size = Vector3.new(12, 0.32, 0.42),
+			Color = PALETTE.stone,
+			Material = Enum.Material.Metal,
+			CanCollide = false,
+			CanTouch = false,
+			CanQuery = true,
+		})
+		marker.Transparency = 0.18
+	end
+end
+
+local function buildSpawn(spawnFolder: Folder)
 	local spawnLocation = InstanceUtil.create("SpawnLocation", {
-		Name = "PulseForgeSpawn",
+		Name = "ResonanceSpawn",
 		Anchored = true,
 		CanCollide = true,
 		CanTouch = true,
 		CanQuery = true,
 		Neutral = true,
 		Duration = 0,
-		CFrame = CFrame.new(0, 3, -22),
-		Size = Vector3.new(12, 1, 12),
-		Color = COLORS.cyan,
-		Material = Enum.Material.Neon,
-		Transparency = 0.35,
+		CFrame = CFrame.new(0, 1.35, -22),
+		Size = Vector3.new(8, 0.8, 8),
+		Color = PALETTE.stone,
+		Material = Enum.Material.Metal,
+		Transparency = 0.15,
 	}, spawnFolder) :: SpawnLocation
 
-	tag(spawnLocation, "PulseForgeStage")
+	tag(spawnLocation, "ResonanceStage")
 end
 
-local function createSpeakers(staticFolder: Folder)
-	for side = -1, 1, 2 do
-		local baseX = side * 32
-		createPart(staticFolder, `SpeakerTower_{side}_Body`, {
-			CFrame = CFrame.new(baseX, 7, 12),
-			Size = Vector3.new(8, 14, 6),
-			Color = Color3.fromRGB(10, 13, 25),
-			Material = Enum.Material.Metal,
-			CanCollide = true,
-			CanTouch = true,
-			CanQuery = true,
-		})
-
-		for level = 1, 3 do
-			local cone = createPart(staticFolder, `SpeakerTower_{side}_Cone_{level}`, {
-				CFrame = CFrame.new(baseX, 3.5 + level * 3.1, 8.65) * CFrame.Angles(math.rad(90), 0, 0),
-				Size = Vector3.new(3.3, 0.35, 3.3),
-				Color = if level == 2 then COLORS.pink else COLORS.cyan,
-				Material = Enum.Material.Neon,
-				Shape = Enum.PartType.Cylinder,
-				CanCollide = false,
-				CanTouch = false,
-				CanQuery = true,
-			})
-			cone.Transparency = 0.15
-		end
-
-		local light = InstanceUtil.create("PointLight", {
-			Name = `SpeakerGlow_{side}`,
-			Color = if side < 0 then COLORS.cyan else COLORS.pink,
-			Range = 24,
-			Brightness = 2.2,
-		}, staticFolder:FindFirstChild(`SpeakerTower_{side}_Body`) :: Instance)
-
-		if light == nil then
-			warn("PulseForge speaker light creation failed")
-		end
-	end
-end
-
-local function createAnchors(anchorFolder: Folder)
-	local count = Constants.VISUALIZER_BAND_COUNT
-	local radius = 38
+local function buildAnchors(anchorFolder: Folder)
+	local count = Constants.FIELD_BAND_COUNT
+	local radius = 18
 
 	for index = 1, count do
 		local alpha = (index - 1) / count
 		local angle = alpha * math.pi * 2
-		local x = math.cos(angle) * radius
-		local z = math.sin(angle) * radius
-		local color = Color3.fromHSV(alpha, 0.82, 1)
-
-		local anchor = createPart(anchorFolder, `Anchor_{string.format("%02d", index)}`, {
-			CFrame = CFrame.new(x, 1.45, z),
-			Size = Vector3.new(1.2, 1.2, 1.2),
-			Color = color,
-			Material = Enum.Material.Neon,
-			Transparency = 0.1,
+		local position = Vector3.new(math.cos(angle) * radius, 1.05, math.sin(angle) * radius)
+		local anchor = createPart(anchorFolder, `FieldAnchor_{string.format("%02d", index)}`, {
+			CFrame = CFrame.new(position),
+			Size = Vector3.new(0.34, 0.34, 0.34),
+			Color = PALETTE.mist,
+			Material = Enum.Material.Glass,
 			CanCollide = false,
 			CanTouch = false,
 			CanQuery = true,
+			Transparency = 0.25,
 		})
-		tag(anchor, "PulseForgeAnchor")
+		tag(anchor, "ResonanceAnchor")
 	end
 end
 
-local function createCenterRing(staticFolder: Folder)
-	local segmentCount = 40
-	local radius = 18
-
-	for index = 1, segmentCount do
-		local alpha = (index - 1) / segmentCount
-		local angle = alpha * math.pi * 2
-		local x = math.cos(angle) * radius
-		local z = math.sin(angle) * radius
-		local segment = createNeonBlock(
-			staticFolder,
-			`CenterRing_{string.format("%02d", index)}`,
-			CFrame.new(x, 2.35, z) * CFrame.Angles(0, -angle, 0),
-			Vector3.new(4.2, 0.35, 0.55),
-			Color3.fromHSV(alpha, 0.9, 1)
-		)
-		segment.CanCollide = false
-		segment.CanTouch = false
+local function buildReferenceRings(staticFolder: Folder)
+	for ringIndex, radius in ipairs({ 10, 18, 27 }) do
+		local segments = 36
+		for index = 1, segments do
+			local alpha = (index - 1) / segments
+			local angle = alpha * math.pi * 2
+			local segment = createPart(staticFolder, `ReferenceRing_{ringIndex}_{string.format("%02d", index)}`, {
+				CFrame = CFrame.new(math.cos(angle) * radius, 1.02 + ringIndex * 0.04, math.sin(angle) * radius)
+					* CFrame.Angles(0, -angle, 0),
+				Size = Vector3.new(2.6, 0.08, 0.08),
+				Color = if ringIndex == 2 then PALETTE.softCyan else PALETTE.stone,
+				Material = Enum.Material.SmoothPlastic,
+				CanCollide = false,
+				CanTouch = false,
+				CanQuery = true,
+				Transparency = if ringIndex == 2 then 0.22 else 0.42,
+			})
+			tag(segment, "ResonanceGuide")
+		end
 	end
 end
 
-local function createLabel(staticFolder: Folder)
+local function buildLabel(staticFolder: Folder)
 	local labelPart = createPart(staticFolder, "WorldLabelAnchor", {
-		CFrame = CFrame.new(0, 13, -31),
+		CFrame = CFrame.new(0, 6.5, -30),
 		Size = Vector3.new(1, 1, 1),
-		Color = COLORS.white,
+		Color = PALETTE.mist,
 		Transparency = 1,
 		CanCollide = false,
 		CanTouch = false,
@@ -262,28 +236,28 @@ local function createLabel(staticFolder: Folder)
 	})
 
 	local billboard = InstanceUtil.create("BillboardGui", {
-		Name = "PulseForgeLabel",
+		Name = "ResonanceLabel",
 		Adornee = labelPart,
 		AlwaysOnTop = true,
-		LightInfluence = 0,
-		Size = UDim2.fromOffset(420, 92),
+		LightInfluence = 0.15,
+		Size = UDim2.fromOffset(360, 54),
 		StudsOffset = Vector3.new(0, 0, 0),
 	}, labelPart) :: BillboardGui
 
 	local textLabel = InstanceUtil.create("TextLabel", {
 		Name = "Title",
 		BackgroundTransparency = 1,
-		Font = Enum.Font.GothamBlack,
-		Text = "PulseForge Lab",
-		TextColor3 = COLORS.white,
+		Font = Enum.Font.GothamMedium,
+		Text = "Resonance Field",
+		TextColor3 = PALETTE.mist,
 		TextScaled = true,
-		TextStrokeTransparency = 0.25,
+		TextStrokeTransparency = 0.7,
 		Size = UDim2.fromScale(1, 1),
 	}, billboard) :: TextLabel
 
 	InstanceUtil.create("UITextSizeConstraint", {
-		MaxTextSize = 42,
-		MinTextSize = 14,
+		MaxTextSize = 28,
+		MinTextSize = 12,
 	}, textLabel)
 end
 
@@ -301,14 +275,10 @@ function LabWorldService:Start()
 	end
 
 	started = true
-
-	local existing = Workspace:FindFirstChild(Constants.LAB_FOLDER_NAME)
-	if existing ~= nil then
-		existing:Destroy()
-	end
+	clearPreviousWorld()
 
 	local root = InstanceUtil.create("Folder", {
-		Name = Constants.LAB_FOLDER_NAME,
+		Name = Constants.FIELD_FOLDER_NAME,
 	}, Workspace) :: Folder
 
 	local staticFolder = InstanceUtil.create("Folder", {
@@ -316,31 +286,30 @@ function LabWorldService:Start()
 	}, root) :: Folder
 
 	local anchorFolder = InstanceUtil.create("Folder", {
-		Name = "VisualizerAnchors",
+		Name = "FieldAnchors",
 	}, root) :: Folder
 
-	local orbFolder = InstanceUtil.create("Folder", {
-		Name = "PhysicsOrbs",
+	local pulseFolder = InstanceUtil.create("Folder", {
+		Name = "PulseMasses",
 	}, root) :: Folder
-	tag(orbFolder, "PulseForgeOrbContainer")
+	tag(pulseFolder, "ResonancePulseContainer")
 
 	local spawnFolder = InstanceUtil.create("Folder", {
 		Name = "Spawn",
 	}, root) :: Folder
 
-	createStage(staticFolder)
-	createSpawn(spawnFolder)
-	createSpeakers(staticFolder)
-	createAnchors(anchorFolder)
-	createCenterRing(staticFolder)
-	createLabel(staticFolder)
-	rebuildLighting()
+	buildGround(staticFolder)
+	buildSpawn(spawnFolder)
+	buildAnchors(anchorFolder)
+	buildReferenceRings(staticFolder)
+	buildLabel(staticFolder)
+	configureLighting()
 
-	labFolder = root
+	fieldFolder = root
 end
 
-function LabWorldService:GetLabFolder(): Folder?
-	return labFolder
+function LabWorldService:GetFieldFolder(): Folder?
+	return fieldFolder
 end
 
 return LabWorldService

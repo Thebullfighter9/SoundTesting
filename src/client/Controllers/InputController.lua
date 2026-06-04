@@ -17,18 +17,18 @@ local initialized = false
 local started = false
 local context: any = nil
 local maid = Maid.new()
-local beatOrbRemote: RemoteEvent? = nil
-local lastBeatOrbRequest = 0
+local fieldPulseRemote: RemoteEvent? = nil
+local lastPulseRequest = 0
 
-local ACTION_DROP = "PulseForgeDropBeatOrb"
-local ACTION_DROP_SPACE = "PulseForgeDropBeatOrbSpace"
-local ACTION_PRESET = "PulseForgeCyclePreset"
-local ACTION_MIC = "PulseForgeTryMic"
-local ACTION_DEMO = "PulseForgeDemoMode"
+local ACTION_PULSE = "ResonanceSendPulse"
+local ACTION_PULSE_SPACE = "ResonanceSendPulseSpace"
+local ACTION_PRESET = "ResonanceCyclePreset"
+local ACTION_MIC = "ResonanceTryMic"
+local ACTION_DEMO = "ResonanceDemoMode"
 
 local function getRemote(): RemoteEvent?
-	if beatOrbRemote ~= nil then
-		return beatOrbRemote
+	if fieldPulseRemote ~= nil then
+		return fieldPulseRemote
 	end
 
 	local remotesFolder = ReplicatedStorage:WaitForChild(Constants.REMOTES_FOLDER_NAME, 10)
@@ -36,18 +36,18 @@ local function getRemote(): RemoteEvent?
 		return nil
 	end
 
-	local remote = remotesFolder:WaitForChild(RemoteNames.BeatOrbRequested, 10)
+	local remote = remotesFolder:WaitForChild(RemoteNames.FieldPulseRequested, 10)
 	if remote ~= nil and remote:IsA("RemoteEvent") then
-		beatOrbRemote = remote
+		fieldPulseRemote = remote
 		return remote
 	end
 
 	return nil
 end
 
-local function currentEnergy(): number
+local function currentIntensity(): number
 	local frame = context.AudioInputController:GetFrame()
-	return math.clamp(math.max(frame.rms, frame.peak, frame.bass) * 1.1, 0, 1)
+	return math.clamp(math.max(frame.rms, frame.peak, frame.bass) * 1.05, 0, 1)
 end
 
 function InputController:Init(nextContext: any)
@@ -65,11 +65,11 @@ function InputController:Start()
 	end
 
 	started = true
-	beatOrbRemote = getRemote()
+	fieldPulseRemote = getRemote()
 
-	local function handleDrop(_actionName: string, inputState: Enum.UserInputState, _inputObject: InputObject): Enum.ContextActionResult
+	local function handlePulse(_actionName: string, inputState: Enum.UserInputState, _inputObject: InputObject): Enum.ContextActionResult
 		if inputState == Enum.UserInputState.Begin then
-			self:RequestBeatOrb()
+			self:RequestFieldPulse()
 		end
 
 		return Enum.ContextActionResult.Sink
@@ -77,7 +77,7 @@ function InputController:Start()
 
 	local function handleSpace(_actionName: string, inputState: Enum.UserInputState, _inputObject: InputObject): Enum.ContextActionResult
 		if inputState == Enum.UserInputState.Begin then
-			self:RequestBeatOrb()
+			self:RequestFieldPulse()
 		end
 
 		return Enum.ContextActionResult.Pass
@@ -108,58 +108,58 @@ function InputController:Start()
 	local function handleDemo(_actionName: string, inputState: Enum.UserInputState, _inputObject: InputObject): Enum.ContextActionResult
 		if inputState == Enum.UserInputState.Begin then
 			context.AudioInputController:SetMode("Demo")
-			context.UIController:SetStatus("Demo mode active")
-			context.EffectsController:PlayToast("Demo mode active")
+			context.UIController:SetStatus("Demo pulse active")
+			context.EffectsController:PlayToast("Demo pulse active")
 		end
 
 		return Enum.ContextActionResult.Sink
 	end
 
-	ContextActionService:BindAction(ACTION_DROP, handleDrop, false, Enum.KeyCode.E)
-	ContextActionService:BindAction(ACTION_DROP_SPACE, handleSpace, false, Enum.KeyCode.Space)
+	ContextActionService:BindAction(ACTION_PULSE, handlePulse, false, Enum.KeyCode.E)
+	ContextActionService:BindAction(ACTION_PULSE_SPACE, handleSpace, false, Enum.KeyCode.Space)
 	ContextActionService:BindAction(ACTION_PRESET, handlePreset, false, Enum.KeyCode.B)
 	ContextActionService:BindAction(ACTION_MIC, handleMic, false, Enum.KeyCode.M)
 	ContextActionService:BindAction(ACTION_DEMO, handleDemo, false, Enum.KeyCode.N)
 
 	maid:Give(function()
-		ContextActionService:UnbindAction(ACTION_DROP)
-		ContextActionService:UnbindAction(ACTION_DROP_SPACE)
+		ContextActionService:UnbindAction(ACTION_PULSE)
+		ContextActionService:UnbindAction(ACTION_PULSE_SPACE)
 		ContextActionService:UnbindAction(ACTION_PRESET)
 		ContextActionService:UnbindAction(ACTION_MIC)
 		ContextActionService:UnbindAction(ACTION_DEMO)
 	end)
 end
 
-function InputController:RequestBeatOrb()
+function InputController:RequestFieldPulse()
 	local now = os.clock()
-	if now - lastBeatOrbRequest < Constants.BEAT_ORB_COOLDOWN then
-		context.UIController:SetStatus("Beat orb limited")
-		context.EffectsController:PlayToast("Beat orb limited")
+	if now - lastPulseRequest < Constants.FIELD_PULSE_COOLDOWN then
+		context.UIController:SetStatus("Pulse limited")
+		context.EffectsController:PlayToast("Pulse limited")
 		return
 	end
 
 	local remote = getRemote()
 	if remote == nil then
-		context.UIController:SetStatus("Beat orb remote unavailable")
-		context.EffectsController:PlayToast("Beat orb remote unavailable")
+		context.UIController:SetStatus("Pulse remote unavailable")
+		context.EffectsController:PlayToast("Pulse remote unavailable")
 		return
 	end
 
-	lastBeatOrbRequest = now
-	local energy = math.clamp(NumberUtil.sanitizeFiniteNumber(currentEnergy(), 0), 0, 1)
+	lastPulseRequest = now
+	local intensity = math.clamp(NumberUtil.sanitizeFiniteNumber(currentIntensity(), 0), 0, 1)
 	local ok = pcall(function()
 		remote:FireServer({
-			energy = energy,
+			intensity = intensity,
 		})
 	end)
 
 	if ok then
-		context.UIController:SetStatus("Beat orb dropped")
-		context.EffectsController:PulseBeat(math.max(energy, 0.35))
-		context.EffectsController:PlayToast("Beat orb dropped")
+		context.UIController:SetStatus("Pulse sent")
+		context.EffectsController:PulseBeat(math.max(intensity, 0.28))
+		context.EffectsController:PlayToast("Pulse sent")
 	else
-		context.UIController:SetStatus("Beat orb request failed")
-		context.EffectsController:PlayToast("Beat orb request failed")
+		context.UIController:SetStatus("Pulse request failed")
+		context.EffectsController:PlayToast("Pulse request failed")
 	end
 end
 

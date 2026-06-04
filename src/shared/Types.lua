@@ -1,6 +1,6 @@
 --!strict
 
-export type VisualizerPreset = "Bars" | "Ring" | "Orbit" | "Physics" | "Calm" | "Chaos"
+export type VisualizerPreset = "Field" | "Wave" | "Orbit" | "Still"
 export type AudioMode = "Demo" | "Asset" | "Mic"
 export type BandArray = { number }
 
@@ -13,8 +13,8 @@ export type AudioFrame = {
 	time: number,
 }
 
-export type BeatOrbPayload = {
-	energy: number?,
+export type FieldPulsePayload = {
+	intensity: number?,
 }
 
 export type Controller = {

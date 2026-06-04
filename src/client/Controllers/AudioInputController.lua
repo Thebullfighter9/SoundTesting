@@ -26,7 +26,7 @@ local audioMaid = Maid.new()
 local callbacks: { (AudioFrame) -> () } = {}
 
 local mode: AudioMode = "Demo"
-local status = "Demo mode active"
+local status = "Demo pulse active"
 local sensitivity = Constants.DEFAULT_SENSITIVITY
 local demoTime = 0
 local rollingEnergy = 0.12
@@ -35,7 +35,7 @@ local assetAnalyzer: AudioAnalyzer? = nil
 local micAnalyzer: AudioAnalyzer? = nil
 local classicSound: Sound? = nil
 
-local smoothedBands: BandArray = table.create(Constants.VISUALIZER_BAND_COUNT, 0)
+local smoothedBands: BandArray = table.create(Constants.FIELD_BAND_COUNT, 0)
 local currentFrame: AudioFrame = {
 	rms = 0,
 	peak = 0,
@@ -46,7 +46,7 @@ local currentFrame: AudioFrame = {
 }
 
 local function makeBands(value: number): BandArray
-	local bands = table.create(Constants.VISUALIZER_BAND_COUNT, value)
+	local bands = table.create(Constants.FIELD_BAND_COUNT, value)
 	return bands
 end
 
@@ -86,7 +86,7 @@ local function createAudioFolder(): Folder
 
 	local playerGui = LocalPlayer:WaitForChild("PlayerGui")
 	local folder = InstanceUtil.create("Folder", {
-		Name = "PulseForgeAudio",
+		Name = "ResonanceAudio",
 	}, playerGui) :: Folder
 
 	audioMaid:Give(folder)
@@ -167,12 +167,12 @@ local function buildBandsFromSpectrum(spectrum: { any }, rms: number, peak: numb
 		return makeBands(math.max(rms, peak * 0.75))
 	end
 
-	local bands = table.create(Constants.VISUALIZER_BAND_COUNT, 0)
+	local bands = table.create(Constants.FIELD_BAND_COUNT, 0)
 	local sourceCount = #spectrum
 
-	for bandIndex = 1, Constants.VISUALIZER_BAND_COUNT do
-		local startIndex = math.max(1, math.floor((bandIndex - 1) / Constants.VISUALIZER_BAND_COUNT * sourceCount) + 1)
-		local endIndex = math.max(startIndex, math.floor(bandIndex / Constants.VISUALIZER_BAND_COUNT * sourceCount))
+	for bandIndex = 1, Constants.FIELD_BAND_COUNT do
+		local startIndex = math.max(1, math.floor((bandIndex - 1) / Constants.FIELD_BAND_COUNT * sourceCount) + 1)
+		local endIndex = math.max(startIndex, math.floor(bandIndex / Constants.FIELD_BAND_COUNT * sourceCount))
 		local total = 0
 		local samples = 0
 
@@ -196,11 +196,11 @@ local function buildBandsFromSpectrum(spectrum: { any }, rms: number, peak: numb
 end
 
 local function synthesizeBandsFromEnergy(rms: number, peak: number, timeNow: number): BandArray
-	local bands = table.create(Constants.VISUALIZER_BAND_COUNT, 0)
+	local bands = table.create(Constants.FIELD_BAND_COUNT, 0)
 	local energy = math.clamp(math.max(rms, peak * 0.8) * sensitivity, 0, 1)
 
-	for index = 1, Constants.VISUALIZER_BAND_COUNT do
-		local bandAlpha = (index - 1) / Constants.VISUALIZER_BAND_COUNT
+	for index = 1, Constants.FIELD_BAND_COUNT do
+		local bandAlpha = (index - 1) / Constants.FIELD_BAND_COUNT
 		local wave = (math.sin(timeNow * 4 + bandAlpha * math.pi * 6) + 1) * 0.5
 		local shaped = energy * (0.45 + wave * 0.55) * (1 - bandAlpha * 0.28)
 		bands[index] = math.clamp(shaped, 0, 1)
@@ -393,7 +393,7 @@ function AudioInputController:_ApplyRawFrame(rawBands: BandArray, rawRms: number
 	local attack = if rawPeak > currentFrame.peak then 20 else 7
 	local release = if rawRms > currentFrame.rms then 18 else 5
 
-	for index = 1, Constants.VISUALIZER_BAND_COUNT do
+	for index = 1, Constants.FIELD_BAND_COUNT do
 		local target = math.clamp(rawBands[index] or 0, 0, 1)
 		local current = smoothedBands[index] or 0
 		local speed = if target > current then attack else release
@@ -430,13 +430,13 @@ function AudioInputController:_GenerateDemoFrame(deltaTime: number)
 	demoTime += deltaTime
 
 	local t = demoTime
-	local bands = table.create(Constants.VISUALIZER_BAND_COUNT, 0)
+	local bands = table.create(Constants.FIELD_BAND_COUNT, 0)
 	local beatWave = (math.sin(t * math.pi * 2 * 1.35) + 1) * 0.5
 	local bassPulse = math.clamp((beatWave - 0.68) / 0.32, 0, 1)
 	local basePulse = (math.sin(t * math.pi * 2 * 0.42) + 1) * 0.5
 
-	for index = 1, Constants.VISUALIZER_BAND_COUNT do
-		local bandAlpha = (index - 1) / Constants.VISUALIZER_BAND_COUNT
+	for index = 1, Constants.FIELD_BAND_COUNT do
+		local bandAlpha = (index - 1) / Constants.FIELD_BAND_COUNT
 		local noise = (math.noise(t * 0.9, bandAlpha * 4.5, 0.25) + 1) * 0.5
 		local ripple = (math.sin(t * 5.5 + bandAlpha * math.pi * 7.5) + 1) * 0.5
 		local bassWeight = math.max(0, 1 - bandAlpha * 2.5)
@@ -446,7 +446,7 @@ function AudioInputController:_GenerateDemoFrame(deltaTime: number)
 	end
 
 	local rms = math.clamp(0.15 + basePulse * 0.22 + bassPulse * 0.5, 0, 1)
-	local peak = math.clamp(rms + bassPulse * 0.28 + bands[Constants.VISUALIZER_BAND_COUNT] * 0.12, 0, 1)
+	local peak = math.clamp(rms + bassPulse * 0.28 + bands[Constants.FIELD_BAND_COUNT] * 0.12, 0, 1)
 	local bass = math.clamp((bands[1] + bands[2] + bands[3] + bands[4]) / 4, 0, 1)
 
 	self:_ApplyRawFrame(bands, rms, peak, bass, deltaTime)
@@ -467,7 +467,7 @@ function AudioInputController:Start()
 
 	started = true
 	mode = "Demo"
-	setStatus("Demo mode active")
+	setStatus("Demo pulse active")
 
 	maid:Give(getRenderSignal():Connect(function(deltaTime: number)
 		if mode == "Demo" then
@@ -494,9 +494,9 @@ function AudioInputController:SetMode(nextMode: AudioMode)
 	if nextMode == "Demo" then
 		stopAudioGraph()
 		mode = "Demo"
-		setStatus("Demo mode active")
+		setStatus("Demo pulse active")
 	elseif nextMode == "Asset" then
-		setStatus("Paste an asset ID, then press Play Asset")
+		setStatus("Enter an audio asset id")
 	elseif nextMode == "Mic" then
 		stopAudioGraph()
 		setStatus("Trying mic input...")
@@ -534,7 +534,7 @@ end
 function AudioInputController:Stop()
 	stopAudioGraph()
 	mode = "Demo"
-	setStatus("Demo mode active")
+	setStatus("Demo pulse active")
 end
 
 function AudioInputController:SetSensitivity(value: number)

@@ -1,77 +1,72 @@
-# SoundTesting: PulseForge Audio Physics Visualizer
+# SoundTesting: Resonance Field
 
-PulseForge is a focused Roblox Luau proof-of-concept for audio-reactive visuals, local audio analysis, generated UI, server-validated physics, and clean client/server architecture.
+Resonance Field is a minimal Roblox Luau audio physics visualizer. It is a clean kinetic sculpture: a measured field of pins, rings, surface tiles, and pulse masses driven by a demo signal, asset audio, or microphone analyzer data when available.
 
-It starts in Demo mode, so it is playable immediately without uploaded audio assets or microphone access. Players can switch visual presets, paste a Roblox audio asset ID, try microphone analysis where modular audio APIs and permissions allow it, and drop server-spawned beat orbs from UI or keyboard input.
-
-## Why It Exists
-
-This repository is a scripting portfolio demo. It favors maintainable Roblox systems over a large content-heavy game: clear ModuleScripts, explicit lifecycle setup, narrow networking, local-only audio processing, reusable generated UI, and a server-authoritative physics interaction.
+This is a scripting portfolio piece, not a game loop. There are no rounds, quests, NPCs, combat, lore, monetization, or simulator-style progression.
 
 ## Controls
 
-- `E`: request a beat orb
-- `Space`: request a beat orb while allowing default jump to continue
-- `B`: cycle visual preset
+- `E`: send a server-validated field pulse
+- `Space`: send a field pulse while allowing default jump to continue
+- `B`: cycle field preset
 - `M`: try Mic mode
 - `N`: return to Demo mode
-- UI buttons: mode selection, asset playback, stop, preset cycling, sensitivity, intensity, beat-orb request
+- UI: mode selection, asset analysis, reset, preset, sensitivity, intensity, pulse
 
 ## Features
 
-- Procedural Demo mode that generates a synthetic 32-band audio frame.
-- Asset mode that first attempts a modular audio graph and falls back to a local `Sound` when needed.
-- Mic mode that attempts modular microphone input and falls back to Demo mode if unavailable.
-- Presets: Bars, Ring, Orbit, Physics, Calm, Chaos.
-- Server-created neon lab built from Roblox primitives.
-- Local-only visualizer bars, ring, orbit objects, speaker pulses, particles, FOV pulse, and beat flash.
-- Server-owned beat orb spawning with validation and rate limiting.
-- Generated responsive UI under `PlayerGui`.
+- Demo mode starts immediately and needs no external assets.
+- Asset mode attempts a modular Roblox audio graph, then falls back to local `Sound` loudness.
+- Mic mode attempts modular microphone analysis and falls back cleanly if unavailable.
+- Presets: Field, Wave, Orbit, Still.
+- Server-built matte gallery environment with field anchors and reference rings.
+- Local-only kinetic field visuals with reused instances.
+- One narrow client-to-server remote for rate-limited pulse mass spawning.
+- Generated UI kept small and utilitarian.
 
 ## Systems Demonstrated
 
 - Rojo project mapping.
-- `Init()` and `Start()` lifecycle.
-- Server/client/shared separation.
-- Remote validation and throttling.
-- Client-local audio analysis and visual effects.
-- Reused visual instances with no per-frame instance creation.
-- Maid-style cleanup.
-- Strict Luau modules.
+- Strict Luau ModuleScripts.
+- Shared/server/client separation.
+- Explicit `Init()` and `Start()` lifecycle.
+- Local audio analysis with privacy-preserving networking.
+- Server-side remote validation and rate limiting.
+- Low-instance-count visual updates with no per-frame allocation.
+- Maid-style cleanup helpers.
 
 ## Run With Rojo
 
-1. Install Rojo if it is not already available.
-2. From this repository root, run:
+```sh
+rojo serve default.project.json
+```
 
-   ```sh
-   rojo serve default.project.json
-   ```
+Connect Roblox Studio to the Rojo server and press Play.
 
-3. Open Roblox Studio.
-4. Connect Studio to the Rojo server.
-5. Press Play.
+## Demo Mode
 
-## Test Demo Mode
+Demo mode generates a synthetic audio frame every render step. It creates smooth bands, RMS, peak, bass, and beat values so the field moves immediately even in an empty place.
 
-Demo mode starts automatically. The bars, ring, orbit objects, speaker pulses, UI readouts, and beat effects should move without any asset ID or microphone permission.
+## Asset Mode
 
-## Test Asset Mode
+Paste a numeric Roblox audio asset ID and press `Analyze`. The client first attempts:
 
-Paste a numeric Roblox audio asset ID into the UI text box and press `Play Asset`. The client attempts `AudioPlayer`, `AudioAnalyzer`, `AudioDeviceOutput`, and `Wire` first. If that graph is unavailable, it tries a local `Sound` and uses `PlaybackLoudness`.
+- `AudioPlayer`
+- `AudioAnalyzer`
+- `AudioDeviceOutput`
+- `Wire`
 
-Invalid, private, empty, negative, nonnumeric, or too-long IDs are rejected or fall back to Demo mode without crashing.
+If modular audio is unavailable, it tries a local `Sound` and reads `PlaybackLoudness`. Invalid or private assets fall back without crashing.
 
-## Test Mic Mode
+## Mic Mode
 
-Press `M` or the `Mic` button. The client attempts `AudioDeviceInput`, `AudioAnalyzer`, and `Wire`. Raw microphone samples are not exposed, saved, or sent to the server. If the API, eligibility, or permission path is unavailable, the UI reports the fallback and returns to Demo mode.
+Mic mode attempts:
 
-## Limitations
+- `AudioDeviceInput`
+- `AudioAnalyzer`
+- `Wire`
 
-- Audio API availability can vary by Studio/client version and permission state.
-- Mic mode depends on Roblox microphone eligibility and runtime support.
-- Asset mode depends on the target asset being public and loadable by the local player.
-- This project intentionally does not include monetization, DataStores, NPCs, combat, or external assets.
+Raw microphone samples are never read, saved, or sent to the server. Microphone support depends on Roblox runtime support, permissions, and player eligibility.
 
 ## Folder Structure
 
@@ -82,14 +77,12 @@ src/client
 docs
 ```
 
-Shared modules hold constants, types, remotes, and utilities. Server modules own the replicated lab and physics orb spawning. Client controllers own audio analysis, generated UI, local visuals, input, and effects.
-
 ## Security Notes
 
-Audio frames, microphone state, spectrum data, RMS, and peak values remain client-side. The only client-to-server remote is `BeatOrbRequested`, and the server accepts only optional cosmetic energy. The server ignores client position, velocity, color, size, and ownership claims.
+Audio frames, microphone state, spectrum data, RMS, peak, bass, and beat values stay client-side. The only remote is `FieldPulseRequested`, and its payload contains only optional cosmetic intensity. The server decides spawn position, size, velocity, physical properties, lifetime, and network ownership.
 
 ## Performance Notes
 
-The visualizer creates instances once and updates them from one render connection. The server spawns a limited number of temporary physics orbs per player. There is no per-frame remote traffic and no per-frame instance creation.
+The field visuals are created once and updated in place from one render connection. UI readouts are throttled. The server only handles limited pulse mass spawns and cleanup.
 
 ## Screenshots

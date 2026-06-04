@@ -2,6 +2,7 @@
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
 
 local LocalPlayer = Players.LocalPlayer
 local Shared = ReplicatedStorage:WaitForChild("Shared")
@@ -29,6 +30,15 @@ local panelStroke: UIStroke? = nil
 local glowPulse = 0
 local lastReadoutUpdate = 0
 
+local COLORS = {
+	panel = Color3.fromRGB(16, 18, 19),
+	panelSoft = Color3.fromRGB(26, 29, 30),
+	line = Color3.fromRGB(92, 122, 122),
+	text = Color3.fromRGB(211, 222, 220),
+	muted = Color3.fromRGB(148, 164, 162),
+	accent = Color3.fromRGB(115, 178, 180),
+}
+
 local function textConstraint(parent: Instance, minSize: number, maxSize: number)
 	InstanceUtil.create("UITextSizeConstraint", {
 		MinTextSize = minSize,
@@ -47,7 +57,7 @@ local function createLabel(parent: Instance, name: string, text: string, height:
 		TextScaled = true,
 		TextXAlignment = Enum.TextXAlignment.Left,
 	}, parent) :: TextLabel
-	textConstraint(label, 10, height)
+	textConstraint(label, 9, height)
 	return label
 end
 
@@ -55,34 +65,34 @@ local function createButton(parent: Instance, text: string, activated: () -> ())
 	local button = InstanceUtil.create("TextButton", {
 		Name = string.gsub(text, "%s+", "") .. "Button",
 		AutoButtonColor = true,
-		BackgroundColor3 = Color3.fromRGB(15, 26, 46),
-		Font = Enum.Font.GothamMedium,
-		Size = UDim2.new(1, 0, 0, 34),
+		BackgroundColor3 = COLORS.panelSoft,
+		Font = Enum.Font.Gotham,
+		Size = UDim2.new(1, 0, 0, 30),
 		Text = text,
-		TextColor3 = Color3.fromRGB(230, 252, 255),
+		TextColor3 = COLORS.text,
 		TextScaled = true,
 	}, parent) :: TextButton
 
 	InstanceUtil.create("UICorner", {
-		CornerRadius = UDim.new(0, 7),
+		CornerRadius = UDim.new(0, 5),
 	}, button)
 
 	InstanceUtil.create("UIStroke", {
-		Color = Color3.fromRGB(0, 242, 255),
+		Color = COLORS.line,
 		Thickness = 1,
-		Transparency = 0.58,
+		Transparency = 0.55,
 	}, button)
 
-	textConstraint(button, 9, 15)
+	textConstraint(button, 9, 13)
 	maid:Give(button.Activated:Connect(activated))
 	return button
 end
 
-local function createRow(parent: Instance, name: string, columns: number): Frame
+local function createRow(parent: Instance, name: string, columns: number, height: number): Frame
 	local row = InstanceUtil.create("Frame", {
 		Name = name,
 		BackgroundTransparency = 1,
-		Size = UDim2.new(1, 0, 0, 34),
+		Size = UDim2.new(1, 0, 0, height),
 	}, parent) :: Frame
 
 	InstanceUtil.create("UIGridLayout", {
@@ -97,18 +107,18 @@ local function createRow(parent: Instance, name: string, columns: number): Frame
 end
 
 local function createReadout(parent: Instance, name: string, text: string): TextLabel
-	return createLabel(parent, name, text, 24, Enum.Font.GothamMedium, Color3.fromRGB(195, 220, 235))
+	return createLabel(parent, name, text, 21, Enum.Font.Gotham, COLORS.muted)
 end
 
 local function buildUi()
 	local playerGui = LocalPlayer:WaitForChild("PlayerGui")
-	local existing = playerGui:FindFirstChild("PulseForgeGui")
+	local existing = playerGui:FindFirstChild("ResonanceGui")
 	if existing ~= nil then
 		existing:Destroy()
 	end
 
 	local gui = InstanceUtil.create("ScreenGui", {
-		Name = "PulseForgeGui",
+		Name = "ResonanceGui",
 		ResetOnSpawn = false,
 		IgnoreGuiInset = false,
 		ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
@@ -118,28 +128,28 @@ local function buildUi()
 	maid:Give(gui)
 
 	local panel = InstanceUtil.create("Frame", {
-		Name = "MainPanel",
+		Name = "InstrumentPanel",
 		AutomaticSize = Enum.AutomaticSize.Y,
-		BackgroundColor3 = Color3.fromRGB(6, 10, 22),
+		BackgroundColor3 = COLORS.panel,
 		BackgroundTransparency = 0.08,
 		BorderSizePixel = 0,
-		Position = UDim2.fromOffset(16, 16),
-		Size = UDim2.fromOffset(344, 0),
+		Position = UDim2.fromOffset(18, 18),
+		Size = UDim2.fromOffset(318, 0),
 	}, gui) :: Frame
 
 	InstanceUtil.create("UISizeConstraint", {
-		MaxSize = Vector2.new(390, 900),
-		MinSize = Vector2.new(280, 0),
+		MaxSize = Vector2.new(360, 820),
+		MinSize = Vector2.new(270, 0),
 	}, panel)
 
 	InstanceUtil.create("UICorner", {
-		CornerRadius = UDim.new(0, 8),
+		CornerRadius = UDim.new(0, 6),
 	}, panel)
 
 	panelStroke = InstanceUtil.create("UIStroke", {
-		Color = Color3.fromRGB(0, 242, 255),
+		Color = COLORS.line,
 		Thickness = 1,
-		Transparency = 0.32,
+		Transparency = 0.35,
 	}, panel) :: UIStroke
 
 	InstanceUtil.create("UIPadding", {
@@ -150,98 +160,99 @@ local function buildUi()
 	}, panel)
 
 	InstanceUtil.create("UIListLayout", {
-		Padding = UDim.new(0, 8),
+		Padding = UDim.new(0, 7),
 		SortOrder = Enum.SortOrder.LayoutOrder,
 	}, panel)
 
-	createLabel(panel, "Title", "PulseForge", 34, Enum.Font.GothamBlack, Color3.fromRGB(230, 252, 255))
-	statusLabel = createLabel(panel, "Status", "Demo mode active", 28, Enum.Font.GothamMedium, Color3.fromRGB(0, 242, 255))
+	createLabel(panel, "Title", "Resonance Field", 26, Enum.Font.GothamMedium, COLORS.text)
+	statusLabel = createLabel(panel, "Status", "Demo pulse active", 24, Enum.Font.Gotham, COLORS.accent)
 
-	local modeRow = createRow(panel, "ModeRow", 3)
+	local modeRow = createRow(panel, "ModeRow", 3, 30)
 	createButton(modeRow, "Demo", function()
 		context.AudioInputController:SetMode("Demo")
-		UIController:SetStatus("Demo mode active")
-		context.EffectsController:PlayToast("Demo mode active")
+		UIController:SetStatus("Demo pulse active")
+		context.EffectsController:PlayToast("Demo pulse active")
 	end)
 	createButton(modeRow, "Asset", function()
-		UIController:SetStatus("Paste an asset ID, then Play Asset")
+		UIController:SetStatus("Enter an audio asset id")
+		context.EffectsController:PlayToast("Enter an audio asset id")
 	end)
 	createButton(modeRow, "Mic", function()
 		context.AudioInputController:SetMode("Mic")
-		UIController:SetStatus(context.AudioInputController:GetStatus())
-		context.EffectsController:PlayToast(context.AudioInputController:GetStatus())
-	end)
-
-	local assetBox = InstanceUtil.create("TextBox", {
-		Name = "AssetIdBox",
-		BackgroundColor3 = Color3.fromRGB(9, 15, 29),
-		ClearTextOnFocus = false,
-		Font = Enum.Font.Gotham,
-		PlaceholderText = "Audio asset ID",
-		Size = UDim2.new(1, 0, 0, 34),
-		Text = "",
-		TextColor3 = Color3.fromRGB(230, 252, 255),
-		TextScaled = true,
-	}, panel) :: TextBox
-	InstanceUtil.create("UICorner", {
-		CornerRadius = UDim.new(0, 7),
-	}, assetBox)
-	InstanceUtil.create("UIStroke", {
-		Color = Color3.fromRGB(75, 110, 145),
-		Thickness = 1,
-		Transparency = 0.25,
-	}, assetBox)
-	textConstraint(assetBox, 10, 15)
-
-	local assetRow = createRow(panel, "AssetControls", 2)
-	createButton(assetRow, "Play Asset", function()
-		context.AudioInputController:PlayAsset(assetBox.Text)
-		local nextStatus = context.AudioInputController:GetStatus()
-		UIController:SetStatus(nextStatus)
-		context.EffectsController:PlayToast(nextStatus)
-	end)
-	createButton(assetRow, "Stop", function()
-		context.AudioInputController:Stop()
-		UIController:SetStatus("Demo mode active")
-		context.EffectsController:PlayToast("Demo mode active")
-	end)
-
-	createButton(panel, "Next Preset", function()
-		context.VisualizerController:CyclePreset()
-		local nextPreset = context.VisualizerController:GetPreset()
-		local text = `Preset: {nextPreset}`
+		local text = context.AudioInputController:GetStatus()
 		UIController:SetStatus(text)
 		context.EffectsController:PlayToast(text)
 	end)
 
-	local sensitivityRow = createRow(panel, "SensitivityRow", 2)
+	local assetBox = InstanceUtil.create("TextBox", {
+		Name = "AssetIdBox",
+		BackgroundColor3 = Color3.fromRGB(12, 14, 15),
+		ClearTextOnFocus = false,
+		Font = Enum.Font.Gotham,
+		PlaceholderText = "audio asset id",
+		Size = UDim2.new(1, 0, 0, 30),
+		Text = "",
+		TextColor3 = COLORS.text,
+		TextScaled = true,
+	}, panel) :: TextBox
+	InstanceUtil.create("UICorner", {
+		CornerRadius = UDim.new(0, 5),
+	}, assetBox)
+	InstanceUtil.create("UIStroke", {
+		Color = COLORS.line,
+		Thickness = 1,
+		Transparency = 0.58,
+	}, assetBox)
+	textConstraint(assetBox, 9, 13)
+
+	local assetRow = createRow(panel, "AssetControls", 2, 30)
+	createButton(assetRow, "Analyze", function()
+		context.AudioInputController:PlayAsset(assetBox.Text)
+		local text = context.AudioInputController:GetStatus()
+		UIController:SetStatus(text)
+		context.EffectsController:PlayToast(text)
+	end)
+	createButton(assetRow, "Reset", function()
+		context.AudioInputController:Stop()
+		UIController:SetStatus("Demo pulse active")
+		context.EffectsController:PlayToast("Demo pulse active")
+	end)
+
+	createButton(panel, "Preset", function()
+		context.VisualizerController:CyclePreset()
+		local text = `Preset: {context.VisualizerController:GetPreset()}`
+		UIController:SetStatus(text)
+		context.EffectsController:PlayToast(text)
+	end)
+
+	local sensitivityRow = createRow(panel, "SensitivityRow", 2, 30)
 	createButton(sensitivityRow, "Sensitivity -", function()
 		local audio = context.AudioInputController
-		audio:SetSensitivity(audio:GetSensitivity() - 0.15)
+		audio:SetSensitivity(audio:GetSensitivity() - 0.12)
 	end)
 	createButton(sensitivityRow, "Sensitivity +", function()
 		local audio = context.AudioInputController
-		audio:SetSensitivity(audio:GetSensitivity() + 0.15)
+		audio:SetSensitivity(audio:GetSensitivity() + 0.12)
 	end)
 
-	local intensityRow = createRow(panel, "IntensityRow", 2)
+	local intensityRow = createRow(panel, "IntensityRow", 2, 30)
 	createButton(intensityRow, "Intensity -", function()
 		local visualizer = context.VisualizerController
-		visualizer:SetIntensity(visualizer:GetIntensity() - 0.15)
+		visualizer:SetIntensity(visualizer:GetIntensity() - 0.12)
 	end)
 	createButton(intensityRow, "Intensity +", function()
 		local visualizer = context.VisualizerController
-		visualizer:SetIntensity(visualizer:GetIntensity() + 0.15)
+		visualizer:SetIntensity(visualizer:GetIntensity() + 0.12)
 	end)
 
-	createButton(panel, "Drop Beat Orb", function()
-		context.InputController:RequestBeatOrb()
+	createButton(panel, "Send Pulse", function()
+		context.InputController:RequestFieldPulse()
 	end)
 
 	rmsReadout = createReadout(panel, "RmsReadout", "RMS 0.00")
 	peakReadout = createReadout(panel, "PeakReadout", "Peak 0.00")
-	beatReadout = createReadout(panel, "BeatReadout", "Beat no")
-	presetReadout = createReadout(panel, "PresetReadout", "Preset: Bars")
+	beatReadout = createReadout(panel, "BeatReadout", "Pulse no")
+	presetReadout = createReadout(panel, "PresetReadout", "Preset: Field")
 	modeReadout = createReadout(panel, "ModeReadout", "Mode: Demo")
 	sensitivityReadout = createReadout(panel, "SensitivityReadout", "Sensitivity: 1.00")
 	intensityReadout = createReadout(panel, "IntensityReadout", "Intensity: 1.00")
@@ -260,7 +271,7 @@ local function updateReadouts()
 
 	setText(rmsReadout, string.format("RMS %.2f", frame.rms))
 	setText(peakReadout, string.format("Peak %.2f", frame.peak))
-	setText(beatReadout, `Beat {if frame.beat then "yes" else "no"}`)
+	setText(beatReadout, `Pulse {if frame.beat then "yes" else "no"}`)
 	setText(presetReadout, `Preset: {visualizer:GetPreset()}`)
 	setText(modeReadout, `Mode: {audio:GetMode()}`)
 	setText(sensitivityReadout, string.format("Sensitivity: %.2f", audio:GetSensitivity()))
@@ -291,7 +302,7 @@ function UIController:Start()
 
 	local disconnect = context.AudioInputController:OnFrameChanged(function()
 		local now = os.clock()
-		if now - lastReadoutUpdate < 0.08 then
+		if now - lastReadoutUpdate < 0.1 then
 			return
 		end
 
@@ -300,13 +311,13 @@ function UIController:Start()
 	end)
 	maid:Give(disconnect)
 
-	maid:Give(game:GetService("RunService").Heartbeat:Connect(function(deltaTime: number)
-		glowPulse = NumberUtil.expSmoothing(glowPulse, 0, deltaTime, 8)
+	maid:Give(RunService.Heartbeat:Connect(function(deltaTime: number)
+		glowPulse = NumberUtil.expSmoothing(glowPulse, 0, deltaTime, 6)
 		local stroke = panelStroke
 		if stroke ~= nil then
-			stroke.Thickness = 1 + glowPulse * 2
-			stroke.Transparency = 0.36 - math.clamp(glowPulse * 0.24, 0, 0.24)
-			stroke.Color = Color3.fromHSV((os.clock() * 0.08) % 1, 0.75, 1)
+			stroke.Thickness = 1 + glowPulse
+			stroke.Transparency = 0.38 - math.clamp(glowPulse * 0.16, 0, 0.16)
+			stroke.Color = Color3.fromRGB(92 + math.floor(glowPulse * 32), 122 + math.floor(glowPulse * 42), 122 + math.floor(glowPulse * 42))
 		end
 	end))
 end

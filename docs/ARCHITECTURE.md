@@ -1,6 +1,6 @@
 # Architecture
 
-PulseForge uses a Rojo layout that maps shared modules, server code, and client code into separate Roblox runtime locations.
+Resonance Field uses a Rojo layout with a clear runtime split.
 
 ```text
 src/shared -> ReplicatedStorage/Shared
@@ -8,34 +8,36 @@ src/server -> ServerScriptService/Server
 src/client -> StarterPlayer/StarterPlayerScripts/Client
 ```
 
-## Runtime Split
+## Shared
 
-Shared modules contain constants, exported types, remote names, and utility modules. They do not start loops, connect events, or mutate world state at require time.
+Shared modules contain constants, exported types, remote names, and small utilities. They do not connect events or start loops at require time.
 
-Server modules own replicated world setup and beat-orb spawning:
+## Server
 
-- `RemoteService` creates `ReplicatedStorage/Remotes` and the one RemoteEvent.
-- `LabWorldService` rebuilds the neon lab, spawn, anchors, orb container, and lighting.
-- `BeatOrbService` validates remote requests and spawns temporary physics orbs.
+Server modules own replicated state:
 
-Client controllers own local-only audio analysis, UI, visuals, input, and effects:
+- `RemoteService` creates the remotes folder and `FieldPulseRequested`.
+- `LabWorldService` rebuilds the matte field sculpture environment.
+- `FieldPulseService` validates pulse requests and spawns temporary pulse masses.
 
-- `AudioInputController` produces the current audio frame in Demo, Asset, or Mic mode.
-- `VisualizerController` reuses local visual parts and updates them each render step.
-- `EffectsController` handles beat flash, particles, FOV pulse, and toast messages.
-- `UIController` builds the generated UI under `PlayerGui`.
-- `InputController` binds keyboard actions and sends narrow beat-orb requests.
+## Client
 
-## Audio Is Local
+Client controllers own presentation and input:
 
-Audio analysis stays on the client because it is presentation state. RMS, peak, spectrum bands, microphone state, and local asset loudness are not sent to the server. This avoids per-frame network traffic and keeps microphone/audio information private to the local player.
+- `AudioInputController` produces audio frames in Demo, Asset, or Mic mode.
+- `VisualizerController` updates local-only field pins, surface tiles, wave segments, and orbit masses.
+- `EffectsController` handles restrained pulse feedback and toast messages.
+- `UIController` builds the compact generated UI.
+- `InputController` binds keys and sends narrow pulse requests.
+
+## Audio Boundary
+
+Audio analysis is local presentation state. Spectrum, RMS, peak, beat, microphone state, and asset loudness are not sent to the server.
 
 ## Remote Boundary
 
-The only required remote is `BeatOrbRequested`, sent from client to server. Its payload contains optional cosmetic energy only. The server ignores client position, velocity, color, size, and ownership claims.
+The only gameplay remote is `FieldPulseRequested`, sent client -> server. It accepts optional cosmetic intensity only. The server ignores client position, velocity, color, size, and ownership claims.
 
 ## Lifecycle
 
-Every service and controller exposes `Init()` and `Start()`. `Init()` stores dependencies and prepares state. `Start()` connects events, starts render work, or builds world/UI instances.
-
-No module starts loops or connects events at require time. This keeps boot order explicit and makes modules easier to inspect, test, and replace.
+Modules expose `Init()` and `Start()`. Requiring a module does not start loops or connect events. Bootstrap scripts call all `Init()` methods first, then all `Start()` methods.
