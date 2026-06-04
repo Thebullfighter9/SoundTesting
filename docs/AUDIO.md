@@ -1,10 +1,12 @@
 # Audio
 
-Resonance Field keeps all audio analysis local to the client. Audio frames are presentation data, not server authority.
+ArrayWave keeps all audio analysis local to the client. Audio frames are presentation data, not server authority.
 
 ## Demo Mode
 
-Demo mode starts immediately. It synthesizes a calm signal with layered sine waves, a kick-like pulse, slow bass motion, and `math.noise` variation. The controller produces 32 bands, RMS, peak, bass, beat, and frame time.
+Demo mode starts immediately. It synthesizes a signal with layered sine waves, a kick-like pulse, slow bass motion, and `math.noise` variation. The controller produces 32 changing bands, RMS, peak, bass, beat, and frame time.
+
+`ResonanceController` also has a fallback band synthesizer. If the audio frame is unavailable or all bands are flat, Grid, Row, and Circle modes still receive useful band values from RMS, peak, bass, and time.
 
 ## Asset Mode
 

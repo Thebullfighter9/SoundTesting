@@ -15,13 +15,35 @@ local NumberUtil = require((Util:WaitForChild("NumberUtil") :: ModuleScript))
 type AudioFrame = Types.AudioFrame
 type VisualStyle = Types.VisualStyle
 
-type TileVisual = {
+type GridTile = {
 	part: BasePart,
-	basePosition: Vector3,
 	row: number,
 	column: number,
+	basePosition: Vector3,
 	radius: number,
 	angle: number,
+}
+
+type RowBar = {
+	part: BasePart,
+	index: number,
+	basePosition: Vector3,
+}
+
+type CircleBar = {
+	part: BasePart,
+	index: number,
+	direction: Vector3,
+	baseRadius: number,
+	angle: number,
+}
+
+type ShockwaveRing = {
+	folder: Folder,
+	segments: { BasePart },
+	age: number,
+	strength: number,
+	active: boolean,
 }
 
 local ResonanceController = {}
@@ -30,16 +52,36 @@ local initialized = false
 local started = false
 local context: any = nil
 local maid = Maid.new()
-local tiles: { TileVisual } = {}
-local orbitPoints: { BasePart } = {}
-local shockwaveSegments: { BasePart } = {}
-local speakerOverlays: { BasePart } = {}
-local style: VisualStyle = "Field"
+local gridTiles: { GridTile } = {}
+local rowBars: { RowBar } = {}
+local circleBars: { CircleBar } = {}
+local shockwaves: { ShockwaveRing } = {}
+local debugMarkers: { BasePart } = {}
+local style: VisualStyle = Constants.DEFAULT_VISUAL_STYLE :: VisualStyle
 local intensity = Constants.DEFAULT_INTENSITY
-local shockwaveAge = 1
-local shockwaveStrength = 0
+local warnedMissingGallery = false
+local lastBeatTime = 0
+local shockwaveCursor = 1
+
+local rootFolder: Folder? = nil
+local gridFolder: Folder? = nil
+local rowFolder: Folder? = nil
+local circleFolder: Folder? = nil
+local shockwaveFolder: Folder? = nil
+local debugFolder: Folder? = nil
 
 local palette = Constants.PALETTE
+local fallbackCenter = Vector3.new(0, 3, 0)
+local visualCenter = fallbackCenter
+
+local SAFE_FRAME: AudioFrame = {
+	rms = 0.2,
+	peak = 0.32,
+	bass = 0.24,
+	beat = false,
+	bands = {},
+	time = 0,
+}
 
 local function getRenderSignal(): RBXScriptSignal
 	local preRender = (RunService :: any).PreRender
@@ -50,259 +92,431 @@ local function getRenderSignal(): RBXScriptSignal
 	return RunService.RenderStepped
 end
 
-local function getCamera(): Camera
-	local camera = Workspace.CurrentCamera
-	while camera == nil do
-		Workspace:GetPropertyChangedSignal("CurrentCamera"):Wait()
-		camera = Workspace.CurrentCamera
-	end
-
-	return camera
-end
-
 local function createVisualPart(parent: Instance, name: string, props: { [string]: any }): BasePart
 	props.Name = name
 	props.Anchored = true
 	props.CanCollide = false
 	props.CanTouch = false
 	props.CanQuery = false
+	props.CastShadow = false
 	props.TopSurface = Enum.SurfaceType.Smooth
 	props.BottomSurface = Enum.SurfaceType.Smooth
 
 	return InstanceUtil.create("Part", props, parent) :: BasePart
 end
 
-local function getLocalFolder(): Folder
-	local camera = getCamera()
-	local existing = camera:FindFirstChild("ResonanceClientVisuals")
-	if existing ~= nil then
-		existing:Destroy()
-	end
-
-	local folder = InstanceUtil.create("Folder", {
-		Name = "ResonanceClientVisuals",
-	}, camera) :: Folder
-	maid:Give(folder)
-	return folder
+local function createFolder(parent: Instance, name: string): Folder
+	return InstanceUtil.create("Folder", {
+		Name = name,
+	}, parent) :: Folder
 end
 
-local function collectAnchorData(): { TileVisual }
-	local anchorTiles: { TileVisual } = {}
-	local gallery = Workspace:WaitForChild(Constants.GALLERY_FOLDER_NAME, 10)
-	local anchorFolder = if gallery ~= nil then gallery:WaitForChild(Constants.ANCHORS_FOLDER_NAME, 10) else nil
-
-	if anchorFolder ~= nil then
-		local anchors = anchorFolder:GetChildren()
-		table.sort(anchors, function(a: Instance, b: Instance): boolean
-			return a.Name < b.Name
-		end)
-
-		for _, anchor in ipairs(anchors) do
-			if anchor:IsA("BasePart") then
-				local row = anchor:GetAttribute("Row")
-				local column = anchor:GetAttribute("Column")
-				if typeof(row) == "number" and typeof(column) == "number" then
-					local position = anchor.Position
-					table.insert(anchorTiles, {
-						part = anchor,
-						basePosition = position,
-						row = row,
-						column = column,
-						radius = Vector3.new(position.X, 0, position.Z).Magnitude,
-						angle = math.atan2(position.Z, position.X),
-					})
+local function getGalleryCenter(): Vector3
+	local gallery = Workspace:FindFirstChild(Constants.GALLERY_FOLDER_NAME)
+	if gallery ~= nil then
+		local anchors = gallery:FindFirstChild(Constants.ANCHORS_FOLDER_NAME)
+		if anchors ~= nil then
+			local total = Vector3.zero
+			local count = 0
+			for _, child in ipairs(anchors:GetChildren()) do
+				if child:IsA("BasePart") then
+					total += child.Position
+					count += 1
 				end
+			end
+			if count > 0 then
+				local average = total / count
+				return Vector3.new(average.X, fallbackCenter.Y, average.Z)
 			end
 		end
 	end
 
-	if #anchorTiles > 0 then
-		return anchorTiles
+	if not warnedMissingGallery then
+		warn("ArrayWave visualizer using fallback center because ResonanceGallery anchors are missing")
+		warnedMissingGallery = true
 	end
 
-	local gridSize = Constants.FIELD_GRID_SIZE
-	local spacing = 1.55
+	return fallbackCenter
+end
+
+local function getOrCreateRootFolder(): Folder
+	local existing = Workspace:FindFirstChild(Constants.CLIENT_VISUALS_FOLDER_NAME)
+	if existing ~= nil then
+		existing:Destroy()
+	end
+
+	local root = createFolder(Workspace, Constants.CLIENT_VISUALS_FOLDER_NAME)
+	rootFolder = root
+	gridFolder = createFolder(root, "GridArray")
+	rowFolder = createFolder(root, "RowBars")
+	circleFolder = createFolder(root, "RadialCircle")
+	shockwaveFolder = createFolder(root, "Shockwaves")
+	debugFolder = createFolder(root, "DebugMarkers")
+	maid:Give(root)
+
+	return root
+end
+
+local function setFolderVisible(folder: Folder?, visible: boolean)
+	if folder == nil then
+		return
+	end
+
+	for _, descendant in ipairs(folder:GetDescendants()) do
+		if descendant:IsA("BasePart") then
+			local baseTransparency = descendant:GetAttribute("BaseTransparency")
+			if typeof(baseTransparency) ~= "number" then
+				baseTransparency = 0
+			end
+			descendant.Transparency = if visible then baseTransparency else 1
+		end
+	end
+end
+
+local function updateVisibility()
+	setFolderVisible(gridFolder, style == "Grid" or style == "All" or style == "Minimal")
+	setFolderVisible(rowFolder, style == "Row" or style == "All")
+	setFolderVisible(circleFolder, style == "Circle" or style == "All" or style == "Minimal")
+	setFolderVisible(shockwaveFolder, style == "Grid" or style == "Circle" or style == "All" or style == "Minimal")
+end
+
+local function createGrid(center: Vector3)
+	local folder = assert(gridFolder, "Grid folder missing")
+	local gridSize = Constants.GRID_SIZE
+	local spacing = Constants.GRID_SPACING
 	local origin = (gridSize - 1) * spacing * -0.5
+
 	for row = 1, gridSize do
 		for column = 1, gridSize do
-			local position = Vector3.new(origin + (column - 1) * spacing, 1.2, origin + (row - 1) * spacing)
-			table.insert(anchorTiles, {
-				part = Workspace.Terrain,
-				basePosition = position,
+			local x = origin + (column - 1) * spacing
+			local z = origin + (row - 1) * spacing
+			local localPosition = Vector3.new(x, 0, z)
+			local basePosition = center + Vector3.new(x, 0, z)
+			local tile = createVisualPart(folder, `Grid_{row}_{column}`, {
+				CFrame = CFrame.new(basePosition),
+				Size = Vector3.new(0.86, 0.14, 0.86),
+				Color = palette.SoftWhite:Lerp(palette.Cyan, 0.16),
+				Material = Enum.Material.Neon,
+				Transparency = 0.08,
+			})
+			tile:SetAttribute("BaseTransparency", 0.08)
+
+			table.insert(gridTiles, {
+				part = tile,
 				row = row,
 				column = column,
-				radius = Vector3.new(position.X, 0, position.Z).Magnitude,
-				angle = math.atan2(position.Z, position.X),
+				basePosition = basePosition,
+				radius = localPosition.Magnitude,
+				angle = math.atan2(z, x),
 			})
 		end
 	end
-
-	return anchorTiles
 end
 
-local function createTiles(folder: Folder, anchorTiles: { TileVisual })
-	for _, data in ipairs(anchorTiles) do
-		local tile = createVisualPart(folder, `Tile_{data.row}_{data.column}`, {
-			CFrame = CFrame.new(data.basePosition + Vector3.new(0, 0.06, 0)),
-			Size = Vector3.new(1.18, 0.08, 1.18),
-			Color = palette.Graphite:Lerp(palette.SoftWhite, 0.08),
-			Material = Enum.Material.SmoothPlastic,
-			Transparency = 0.05,
-		})
+local function createRowBars(center: Vector3)
+	local folder = assert(rowFolder, "Row folder missing")
+	local count = Constants.ROW_BAR_COUNT
+	local spacing = 0.72
+	local origin = (count - 1) * spacing * -0.5
+	local rowBase = center + Vector3.new(0, 0.15, 18)
 
-		table.insert(tiles, {
-			part = tile,
-			basePosition = data.basePosition,
-			row = data.row,
-			column = data.column,
-			radius = data.radius,
-			angle = data.angle,
+	for index = 1, count do
+		local position = rowBase + Vector3.new(origin + (index - 1) * spacing, 0, 0)
+		local bar = createVisualPart(folder, `RowBar_{index}`, {
+			CFrame = CFrame.new(position + Vector3.new(0, 0.5, 0)),
+			Size = Vector3.new(0.38, 1, 0.62),
+			Color = palette.SoftWhite:Lerp(palette.Cyan, 0.3),
+			Material = Enum.Material.Neon,
+			Transparency = 0.1,
+		})
+		bar:SetAttribute("BaseTransparency", 0.1)
+
+		table.insert(rowBars, {
+			part = bar,
+			index = index,
+			basePosition = position,
 		})
 	end
 end
 
-local function createOrbitPoints(folder: Folder)
-	for index = 1, 24 do
-		local alpha = (index - 1) / 24
+local function createRadialCircle(center: Vector3)
+	local folder = assert(circleFolder, "Circle folder missing")
+	local count = Constants.CIRCLE_BAR_COUNT
+	local radius = 13.5
+
+	for index = 1, count do
+		local alpha = (index - 1) / count
 		local angle = alpha * math.pi * 2
-		local point = createVisualPart(folder, `OrbitPoint_{index}`, {
-			CFrame = CFrame.new(math.cos(angle) * 18, 2.4, math.sin(angle) * 18),
-			Size = Vector3.new(0.34, 0.34, 0.34),
-			Shape = Enum.PartType.Ball,
-			Color = palette.SoftWhite,
-			Material = Enum.Material.Glass,
-			Transparency = 0.42,
+		local direction = Vector3.new(math.cos(angle), 0, math.sin(angle))
+		local position = center + direction * radius + Vector3.new(0, 2.4, 0)
+		local bar = createVisualPart(folder, `CircleBar_{index}`, {
+			CFrame = CFrame.lookAt(position, position + direction),
+			Size = Vector3.new(0.18, 0.44, 1.55),
+			Color = palette.SoftWhite:Lerp(palette.Cyan, 0.36),
+			Material = Enum.Material.Neon,
+			Transparency = 0.12,
 		})
-		table.insert(orbitPoints, point)
+		bar:SetAttribute("BaseTransparency", 0.12)
+
+		table.insert(circleBars, {
+			part = bar,
+			index = index,
+			direction = direction,
+			baseRadius = radius,
+			angle = angle,
+		})
 	end
 end
 
-local function createShockwave(folder: Folder)
-	for index = 1, 48 do
-		local alpha = (index - 1) / 48
-		local angle = alpha * math.pi * 2
-		local segment = createVisualPart(folder, `Shockwave_{index}`, {
-			CFrame = CFrame.new(math.cos(angle) * 4, 1.55, math.sin(angle) * 4) * CFrame.Angles(0, -angle, 0),
-			Size = Vector3.new(0.8, 0.05, 0.05),
-			Color = palette.Cyan,
-			Material = Enum.Material.Glass,
-			Transparency = 1,
+local function createShockwaves(center: Vector3)
+	local folder = assert(shockwaveFolder, "Shockwave folder missing")
+
+	for ringIndex = 1, Constants.SHOCKWAVE_POOL_SIZE do
+		local ringFolder = createFolder(folder, `Shockwave_{ringIndex}`)
+		local segments: { BasePart } = {}
+		for segmentIndex = 1, Constants.SHOCKWAVE_SEGMENT_COUNT do
+			local alpha = (segmentIndex - 1) / Constants.SHOCKWAVE_SEGMENT_COUNT
+			local angle = alpha * math.pi * 2
+			local direction = Vector3.new(math.cos(angle), 0, math.sin(angle))
+			local position = center + direction * 6 + Vector3.new(0, 2.15, 0)
+			local segment = createVisualPart(ringFolder, `Segment_{segmentIndex}`, {
+				CFrame = CFrame.lookAt(position, position + direction),
+				Size = Vector3.new(0.1, 0.08, 1.1),
+				Color = palette.Cyan,
+				Material = Enum.Material.Neon,
+				Transparency = 1,
+			})
+			segment:SetAttribute("BaseTransparency", 1)
+			table.insert(segments, segment)
+		end
+
+		table.insert(shockwaves, {
+			folder = ringFolder,
+			segments = segments,
+			age = 1,
+			strength = 0,
+			active = false,
 		})
-		table.insert(shockwaveSegments, segment)
 	end
 end
 
-local function createSpeakerOverlays(folder: Folder)
-	local positions = {
-		Vector3.new(-31, 3.45, -26.25),
-		Vector3.new(31, 3.45, -26.25),
-		Vector3.new(-31, 3.45, 23.75),
-		Vector3.new(31, 3.45, 23.75),
+local function createDebugMarkers(center: Vector3)
+	local folder = assert(debugFolder, "Debug folder missing")
+	local marker = createVisualPart(folder, "Center", {
+		CFrame = CFrame.new(center),
+		Size = Vector3.new(0.45, 0.45, 0.45),
+		Shape = Enum.PartType.Ball,
+		Color = palette.Amber,
+		Material = Enum.Material.SmoothPlastic,
+		Transparency = 1,
+	})
+	marker:SetAttribute("BaseTransparency", 1)
+	table.insert(debugMarkers, marker)
+end
+
+local function synthesizeBands(frame: AudioFrame): { number }
+	local bands = table.create(Constants.VISUAL_BAND_COUNT, 0)
+	local timeNow = if frame.time > 0 then frame.time else os.clock()
+	local energy = math.clamp(math.max(frame.rms, frame.peak * 0.85, 0.22), 0, 1)
+
+	for index = 1, Constants.VISUAL_BAND_COUNT do
+		local alpha = (index - 1) / Constants.VISUAL_BAND_COUNT
+		local wave = (math.sin(timeNow * 3.8 + alpha * math.pi * 5.5) + 1) * 0.5
+		local bassShape = math.max(0, 1 - alpha * 2.3) * frame.bass
+		bands[index] = math.clamp(energy * (0.34 + wave * 0.42) + bassShape * 0.44, 0, 1)
+	end
+
+	return bands
+end
+
+local function getSafeFrame(): AudioFrame
+	local audio = context and context.AudioController
+	if audio == nil or typeof(audio.GetFrame) ~= "function" then
+		SAFE_FRAME.time = os.clock()
+		SAFE_FRAME.bands = synthesizeBands(SAFE_FRAME)
+		return SAFE_FRAME
+	end
+
+	local ok, frame = pcall(function()
+		return audio:GetFrame()
+	end)
+	if not ok or typeof(frame) ~= "table" then
+		SAFE_FRAME.time = os.clock()
+		SAFE_FRAME.bands = synthesizeBands(SAFE_FRAME)
+		return SAFE_FRAME
+	end
+
+	local audioFrame = frame :: AudioFrame
+	local bands = audioFrame.bands
+	local hasUsefulBand = false
+	if typeof(bands) == "table" then
+		for index = 1, math.min(#bands, Constants.VISUAL_BAND_COUNT) do
+			if NumberUtil.sanitizeFiniteNumber(bands[index], 0) > 0.01 then
+				hasUsefulBand = true
+				break
+			end
+		end
+	end
+
+	local cleanFrame: AudioFrame = {
+		rms = math.clamp(NumberUtil.sanitizeFiniteNumber(audioFrame.rms, 0), 0, 1),
+		peak = math.clamp(NumberUtil.sanitizeFiniteNumber(audioFrame.peak, 0), 0, 1),
+		bass = math.clamp(NumberUtil.sanitizeFiniteNumber(audioFrame.bass, 0), 0, 1),
+		beat = audioFrame.beat == true,
+		bands = if hasUsefulBand then bands else {},
+		time = NumberUtil.sanitizeFiniteNumber(audioFrame.time, os.clock()),
 	}
 
-	for index, position in ipairs(positions) do
-		local overlay = createVisualPart(folder, `SpeakerOverlay_{index}`, {
-			CFrame = CFrame.new(position),
-			Size = Vector3.new(1.6, 4.4, 0.07),
-			Color = palette.Cyan,
-			Material = Enum.Material.Glass,
-			Transparency = 0.82,
-		})
-		table.insert(speakerOverlays, overlay)
-	end
-end
-
-local function styleScale(): number
-	if style == "Minimal" then
-		return 0.38
-	elseif style == "Marbles" then
-		return 1.08
-	elseif style == "Orbit" then
-		return 0.78
+	if not hasUsefulBand then
+		cleanFrame.bands = synthesizeBands(cleanFrame)
 	end
 
-	return 0.9
+	return cleanFrame
 end
 
-local function updateTiles(frame: AudioFrame, energy: number)
-	local gridCenter = (Constants.FIELD_GRID_SIZE + 1) * 0.5
-	local motionScale = styleScale()
+local function getBand(frame: AudioFrame, index: number): number
+	local bands = frame.bands
+	local bandCount = math.max(1, #bands)
+	local value = bands[((index - 1) % bandCount) + 1]
+	return math.clamp(NumberUtil.sanitizeFiniteNumber(value, 0), 0, 1)
+end
+
+local function activateShockwave(strength: number)
+	if #shockwaves == 0 then
+		return
+	end
+
+	local ring = shockwaves[shockwaveCursor]
+	shockwaveCursor += 1
+	if shockwaveCursor > #shockwaves then
+		shockwaveCursor = 1
+	end
+
+	ring.age = 0
+	ring.strength = math.clamp(strength, 0.25, 1)
+	ring.active = true
+end
+
+local function updateGrid(frame: AudioFrame, energy: number)
+	local gridCenter = (Constants.GRID_SIZE + 1) * 0.5
 	local timeNow = frame.time
+	local minimal = style == "Minimal"
+	local visible = style == "Grid" or style == "All" or style == "Minimal"
 
-	for index, tile in ipairs(tiles) do
-		local band = frame.bands[((index - 1) % Constants.VISUAL_BAND_COUNT) + 1] or 0
-		local radialWave = (math.sin(timeNow * 3.1 - tile.radius * 0.55) + 1) * 0.5
+	for index, tile in ipairs(gridTiles) do
+		local band = getBand(frame, index + tile.row * 3 + tile.column)
 		local centerDistance = math.sqrt((tile.row - gridCenter) ^ 2 + (tile.column - gridCenter) ^ 2) / gridCenter
-		local centerWeight = math.clamp(1 - centerDistance * 0.7, 0.15, 1)
-		local bassLift = frame.bass * centerWeight * 1.35
-		local height = (band * 2.2 + radialWave * energy * 1.35 + bassLift) * intensity * motionScale
-		local scale = 1 + math.clamp(band * 0.05 + energy * 0.035, 0, 0.08)
-		local colorWeight = if style == "Minimal" then band * 0.12 else band * 0.32 + energy * 0.16
+		local radialDelay = tile.radius * 0.72
+		local ripple = (math.sin(timeNow * 5.2 - radialDelay + tile.angle * 0.35) + 1) * 0.5
+		local bassWeight = math.clamp(1 - centerDistance * 0.75, 0.08, 1)
+		local lift = (band * 3.8 + ripple * energy * 2.2 + frame.bass * bassWeight * 2.8) * intensity
+		if minimal then
+			lift *= 0.35
+		end
 
-		tile.part.Size = Vector3.new(1.18 * scale, 0.08 + band * 0.05, 1.18 * scale)
-		tile.part.CFrame = CFrame.new(tile.basePosition + Vector3.new(0, 0.05 + height, 0))
-		tile.part.Color = palette.Graphite:Lerp(palette.Cyan, math.clamp(colorWeight, 0, 0.38)):Lerp(palette.SoftWhite, if style == "Minimal" then 0.04 else band * 0.12)
-		tile.part.Transparency = if style == "Minimal" then 0.18 else 0.06
+		local height = math.clamp(0.18 + band * 0.28 + energy * 0.12, 0.14, 0.62)
+		tile.part.Size = Vector3.new(0.86, height, 0.86)
+		tile.part.CFrame = CFrame.new(tile.basePosition + Vector3.new(0, lift + height * 0.5, 0))
+		tile.part.Color = palette.SoftWhite:Lerp(palette.Cyan, math.clamp(band * 0.42 + energy * 0.18, 0, if minimal then 0.16 else 0.58))
+		local transparency = if minimal then 0.42 else 0.08
+		tile.part.Transparency = if visible then transparency else 1
+		tile.part:SetAttribute("BaseTransparency", transparency)
 	end
 end
 
-local function updateOrbit(frame: AudioFrame, energy: number)
-	local visible = if style == "Minimal" then 0.12 elseif style == "Field" then 0.42 else 0.82
-	local radius = if style == "Orbit" then 19 + energy * 2.2 else 17.5 + energy * 0.8
-	local speed = if style == "Orbit" then 0.28 else 0.1
+local function updateRow(frame: AudioFrame, energy: number)
+	local visible = style == "Row" or style == "All"
+	for _, rowBar in ipairs(rowBars) do
+		local leftBias = 1 - ((rowBar.index - 1) / math.max(1, Constants.ROW_BAR_COUNT - 1))
+		local centerDistance = math.abs(rowBar.index - (Constants.ROW_BAR_COUNT + 1) * 0.5) / (Constants.ROW_BAR_COUNT * 0.5)
+		local band = getBand(frame, rowBar.index)
+		local bassBoost = frame.bass * math.max(leftBias, 1 - centerDistance) * 1.6
+		local height = math.clamp(0.7 + (band * 8.5 + bassBoost * 4 + frame.peak * 1.3) * intensity, 0.7, 12)
 
-	for index, point in ipairs(orbitPoints) do
-		local alpha = (index - 1) / #orbitPoints
-		local band = frame.bands[((index * 2 - 1) % Constants.VISUAL_BAND_COUNT) + 1] or 0
-		local angle = alpha * math.pi * 2 + frame.time * speed
-		local y = 2.35 + math.sin(frame.time * 0.9 + index) * (0.25 + energy * 0.55)
-		local size = 0.24 + visible * 0.22 + band * 0.18
-
-		point.CFrame = CFrame.new(math.cos(angle) * radius, y, math.sin(angle) * radius)
-		point.Size = Vector3.new(size, size, size)
-		point.Color = palette.SoftWhite:Lerp(palette.Cyan, math.clamp(band * 0.45, 0, 0.45))
-		point.Transparency = 0.72 - visible * 0.35
+		rowBar.part.Size = Vector3.new(0.38, height, 0.62)
+		rowBar.part.CFrame = CFrame.new(rowBar.basePosition + Vector3.new(0, height * 0.5, 0))
+		rowBar.part.Color = palette.SoftWhite:Lerp(palette.Cyan, math.clamp(band * 0.55 + frame.peak * 0.14, 0, 0.64))
+		rowBar.part.Transparency = if visible then 0.08 else 1
+		rowBar.part:SetAttribute("BaseTransparency", 0.08)
 	end
 end
 
-local function updateShockwave(frame: AudioFrame)
-	if frame.beat then
-		shockwaveAge = 0
-		shockwaveStrength = math.clamp(math.max(frame.peak, frame.bass), 0, 1)
-	end
+local function updateCircle(frame: AudioFrame, energy: number)
+	local visible = style == "Circle" or style == "All" or style == "Minimal"
+	for _, circleBar in ipairs(circleBars) do
+		local band = getBand(frame, circleBar.index * 2)
+		local wave = (math.sin(frame.time * 4.5 + circleBar.angle * 5) + 1) * 0.5
+		local extension = math.clamp((band * 5.2 + frame.peak * 1.2 + wave * energy * 1.5) * intensity, 0.45, 7.5)
+		local yLift = 2.4 + frame.bass * 1.1
+		local position = visualCenter + Vector3.new(0, yLift, 0) + circleBar.direction * (circleBar.baseRadius + extension * 0.5)
 
-	shockwaveAge = math.min(shockwaveAge + 0.035, 1)
-	local alpha = 1 - shockwaveAge
-	local radius = 5 + shockwaveAge * 23
-	local transparency = 1 - alpha * shockwaveStrength * (if style == "Minimal" then 0.22 else 0.45)
-
-	for index, segment in ipairs(shockwaveSegments) do
-		local ringAlpha = (index - 1) / #shockwaveSegments
-		local angle = ringAlpha * math.pi * 2
-		segment.CFrame = CFrame.new(math.cos(angle) * radius, 1.5 + alpha * 0.8, math.sin(angle) * radius) * CFrame.Angles(0, -angle, 0)
-		segment.Size = Vector3.new(1.3 + alpha * 1.2, 0.04, 0.05)
-		segment.Transparency = math.clamp(transparency, 0.52, 1)
+		circleBar.part.Size = Vector3.new(0.18, 0.44 + band * 0.42, 1.2 + extension)
+		circleBar.part.CFrame = CFrame.lookAt(position, position + circleBar.direction)
+		circleBar.part.Color = palette.SoftWhite:Lerp(palette.Cyan, math.clamp(band * 0.52 + energy * 0.18, 0, 0.68))
+		local transparency = if style == "Minimal" then 0.42 else 0.12
+		circleBar.part.Transparency = if visible then transparency else 1
+		circleBar.part:SetAttribute("BaseTransparency", transparency)
 	end
 end
 
-local function updateSpeakers(frame: AudioFrame)
-	local pulse = math.clamp((frame.bass * 0.45 + frame.peak * 0.18) * intensity, 0, 1)
-	for _, overlay in ipairs(speakerOverlays) do
-		overlay.Transparency = 0.86 - pulse * 0.22
-		overlay.Size = Vector3.new(1.6 + pulse * 0.3, 4.4 + pulse * 0.6, 0.07)
+local function updateShockwaves(deltaTime: number)
+	local visible = style == "Grid" or style == "Circle" or style == "All" or style == "Minimal"
+	for _, ring in ipairs(shockwaves) do
+		if ring.active then
+			ring.age += deltaTime / 0.45
+			if ring.age >= 1 then
+				ring.active = false
+				for _, segment in ipairs(ring.segments) do
+					segment.Transparency = 1
+					segment:SetAttribute("BaseTransparency", 1)
+				end
+			else
+				local alpha = 1 - ring.age
+				local radius = 7 + ring.age * 24
+				local visibleScale = if style == "Minimal" then 0.25 else 0.55
+				local transparency = math.clamp(1 - alpha * ring.strength * visibleScale, 0.38, 1)
+				for index, segment in ipairs(ring.segments) do
+					local segmentAlpha = (index - 1) / #ring.segments
+					local angle = segmentAlpha * math.pi * 2
+					local direction = Vector3.new(math.cos(angle), 0, math.sin(angle))
+					local position = visualCenter + Vector3.new(0, 2.25 + alpha * 0.9, 0) + direction * radius
+					segment.CFrame = CFrame.lookAt(position, position + direction)
+					segment.Size = Vector3.new(0.12, 0.08, 1.05 + alpha * 1.2)
+					segment.Transparency = if visible then transparency else 1
+					segment:SetAttribute("BaseTransparency", transparency)
+				end
+			end
+		end
 	end
+end
+
+local function updateVisibilityForStyle()
+	local showGrid = style == "Grid" or style == "All" or style == "Minimal"
+	local showRow = style == "Row" or style == "All"
+	local showCircle = style == "Circle" or style == "All" or style == "Minimal"
+	local showShock = style == "Grid" or style == "Circle" or style == "All" or style == "Minimal"
+
+	setFolderVisible(gridFolder, showGrid)
+	setFolderVisible(rowFolder, showRow)
+	setFolderVisible(circleFolder, showCircle)
+	setFolderVisible(shockwaveFolder, showShock)
 end
 
 local function updateVisuals(deltaTime: number)
-	local frame = context.AudioController:GetFrame()
-	local energy = math.clamp((frame.rms * 0.72 + frame.peak * 0.25 + frame.bass * 0.2) * intensity, 0, 1)
+	local frame = getSafeFrame()
+	local energy = math.clamp((frame.rms * 0.65 + frame.peak * 0.3 + frame.bass * 0.24) * intensity, 0, 1)
 
-	updateTiles(frame, energy)
-	updateOrbit(frame, energy)
-	updateShockwave(frame)
-	updateSpeakers(frame)
+	if frame.beat and frame.time - lastBeatTime > 0.08 then
+		lastBeatTime = frame.time
+		activateShockwave(math.max(frame.peak, frame.bass, 0.35))
+	end
 
-	local camera = context.CameraController
+	updateGrid(frame, energy)
+	updateRow(frame, energy)
+	updateCircle(frame, energy)
+	updateShockwaves(deltaTime)
+
+	local camera = context and context.CameraController
 	if camera ~= nil and typeof(camera.Update) == "function" then
 		camera:Update(deltaTime, frame, style)
 	end
@@ -323,18 +537,22 @@ function ResonanceController:Start()
 	end
 
 	started = true
-	local folder = getLocalFolder()
-	local anchorTiles = collectAnchorData()
-	createTiles(folder, anchorTiles)
-	createOrbitPoints(folder)
-	createShockwave(folder)
-	createSpeakerOverlays(folder)
+	local center = getGalleryCenter()
+	visualCenter = center
+	getOrCreateRootFolder()
+	createGrid(center)
+	createRowBars(center)
+	createRadialCircle(center)
+	createShockwaves(center)
+	createDebugMarkers(center)
+	updateVisibility()
 
 	maid:Give(getRenderSignal():Connect(updateVisuals))
 end
 
 function ResonanceController:SetStyle(nextStyle: VisualStyle)
 	style = nextStyle
+	updateVisibility()
 end
 
 function ResonanceController:CycleStyle()
@@ -352,11 +570,11 @@ function ResonanceController:CycleStyle()
 		nextIndex = 1
 	end
 
-	style = styles[nextIndex] :: VisualStyle
+	self:SetStyle(styles[nextIndex] :: VisualStyle)
 end
 
 function ResonanceController:SetIntensity(value: number)
-	intensity = math.clamp(NumberUtil.sanitizeFiniteNumber(value, Constants.DEFAULT_INTENSITY), 0.2, 2)
+	intensity = math.clamp(NumberUtil.sanitizeFiniteNumber(value, Constants.DEFAULT_INTENSITY), 0.2, 2.5)
 end
 
 function ResonanceController:GetIntensity(): number
@@ -365,6 +583,20 @@ end
 
 function ResonanceController:GetStyle(): VisualStyle
 	return style
+end
+
+function ResonanceController:TriggerPulseTest()
+	activateShockwave(0.85)
+end
+
+function ResonanceController:GetDebugCounts(): { [string]: number }
+	return {
+		GridArray = #gridTiles,
+		RowBars = #rowBars,
+		RadialCircle = #circleBars,
+		Shockwaves = #shockwaves,
+		DebugMarkers = #debugMarkers,
+	}
 end
 
 function ResonanceController:Destroy()

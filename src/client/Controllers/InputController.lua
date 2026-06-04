@@ -25,6 +25,11 @@ local ACTION_DEMO = "ResonanceDemoMode"
 local ACTION_MIC = "ResonanceMicMode"
 local ACTION_ASSET = "ResonanceAssetMode"
 local ACTION_STYLE = "ResonanceCycleStyle"
+local ACTION_STYLE_GRID = "ResonanceStyleGrid"
+local ACTION_STYLE_ROW = "ResonanceStyleRow"
+local ACTION_STYLE_CIRCLE = "ResonanceStyleCircle"
+local ACTION_STYLE_ALL = "ResonanceStyleAll"
+local ACTION_STYLE_MINIMAL = "ResonanceStyleMinimal"
 local ACTION_MARBLE = "ResonanceDropMarble"
 local ACTION_CAMERA = "ResonanceResetCamera"
 
@@ -95,7 +100,27 @@ function InputController:Start()
 	end)
 	bind(ACTION_STYLE, Enum.KeyCode.V, function()
 		context.ResonanceController:CycleStyle()
-		context.UIController:SetStatus(`Style {context.ResonanceController:GetStyle()}`)
+		context.UIController:SetStatus(`Visualizer: {context.ResonanceController:GetStyle()}`)
+	end)
+	bind(ACTION_STYLE_GRID, Enum.KeyCode.One, function()
+		context.ResonanceController:SetStyle("Grid")
+		context.UIController:SetStatus("Visualizer: Grid")
+	end)
+	bind(ACTION_STYLE_ROW, Enum.KeyCode.Two, function()
+		context.ResonanceController:SetStyle("Row")
+		context.UIController:SetStatus("Visualizer: Row")
+	end)
+	bind(ACTION_STYLE_CIRCLE, Enum.KeyCode.Three, function()
+		context.ResonanceController:SetStyle("Circle")
+		context.UIController:SetStatus("Visualizer: Circle")
+	end)
+	bind(ACTION_STYLE_ALL, Enum.KeyCode.Four, function()
+		context.ResonanceController:SetStyle("All")
+		context.UIController:SetStatus("Visualizer: All")
+	end)
+	bind(ACTION_STYLE_MINIMAL, Enum.KeyCode.Five, function()
+		context.ResonanceController:SetStyle("Minimal")
+		context.UIController:SetStatus("Visualizer: Minimal")
 	end)
 	bind(ACTION_MARBLE, Enum.KeyCode.E, function()
 		self:RequestMarble()
@@ -111,6 +136,11 @@ function InputController:Start()
 		ContextActionService:UnbindAction(ACTION_MIC)
 		ContextActionService:UnbindAction(ACTION_ASSET)
 		ContextActionService:UnbindAction(ACTION_STYLE)
+		ContextActionService:UnbindAction(ACTION_STYLE_GRID)
+		ContextActionService:UnbindAction(ACTION_STYLE_ROW)
+		ContextActionService:UnbindAction(ACTION_STYLE_CIRCLE)
+		ContextActionService:UnbindAction(ACTION_STYLE_ALL)
+		ContextActionService:UnbindAction(ACTION_STYLE_MINIMAL)
 		ContextActionService:UnbindAction(ACTION_MARBLE)
 		ContextActionService:UnbindAction(ACTION_CAMERA)
 	end)

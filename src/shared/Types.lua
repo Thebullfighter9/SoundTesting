@@ -1,14 +1,14 @@
 --!strict
 
 export type AudioMode = "Demo" | "Asset" | "Mic"
-export type VisualStyle = "Field" | "Orbit" | "Marbles" | "Minimal"
+export type VisualStyle = "Grid" | "Row" | "Circle" | "All" | "Minimal"
 
 export type AudioFrame = {
 	rms: number,
 	peak: number,
 	bass: number,
 	beat: boolean,
-	bands: BandArray,
+	bands: { number },
 	time: number,
 }
 

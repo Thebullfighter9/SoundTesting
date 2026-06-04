@@ -22,6 +22,12 @@ local maid = Maid.new()
 local pulse = 0
 local baseFov = 70
 local lastBeatTime = 0
+local framingUntil = 0
+local hasReleasedFrame = true
+
+local function getFramedCFrame(): CFrame
+	return CFrame.lookAt(Vector3.new(0, 24, -44), Vector3.new(0, 4, 0))
+end
 
 local function getCamera(): Camera?
 	return Workspace.CurrentCamera
@@ -33,17 +39,18 @@ local function frameSculpture()
 		return
 	end
 
-	camera.CameraType = Enum.CameraType.Custom
-	camera.FieldOfView = 68
-
 	local character = LocalPlayer.Character
 	local root = if character ~= nil then character:FindFirstChild("HumanoidRootPart") else nil
 	if root ~= nil and root:IsA("BasePart") then
 		root.CFrame = CFrame.lookAt(root.Position, Vector3.new(0, root.Position.Y, 0))
 	end
 
-	camera.CFrame = CFrame.lookAt(Vector3.new(0, 15, -34), Vector3.new(0, 2.2, 0))
+	camera.CameraType = Enum.CameraType.Scriptable
+	camera.CFrame = getFramedCFrame()
+	camera.FieldOfView = 72
 	baseFov = camera.FieldOfView
+	framingUntil = os.clock() + 6
+	hasReleasedFrame = false
 end
 
 function CameraController:Init(_context: any)
@@ -77,6 +84,14 @@ function CameraController:Update(deltaTime: number, frame: AudioFrame, style: Vi
 		return
 	end
 
+	if os.clock() <= framingUntil then
+		camera.CameraType = Enum.CameraType.Scriptable
+		camera.CFrame = getFramedCFrame()
+	elseif not hasReleasedFrame then
+		camera.CameraType = Enum.CameraType.Custom
+		hasReleasedFrame = true
+	end
+
 	if frame.beat and frame.time - lastBeatTime > 0.16 then
 		pulse = math.max(pulse, math.clamp(math.max(frame.peak, frame.bass), 0, 1))
 		lastBeatTime = frame.time
@@ -89,7 +104,7 @@ function CameraController:Update(deltaTime: number, frame: AudioFrame, style: Vi
 	local targetFov = baseFov + pulse * 2.2
 	camera.FieldOfView = NumberUtil.expSmooth(camera.FieldOfView, targetFov, deltaTime, 6)
 
-	if style == "Marbles" and pulse > 0.08 then
+	if style == "All" and pulse > 0.08 then
 		local shake = math.clamp(pulse * 0.035, 0, 0.045)
 		local timeNow = os.clock()
 		camera.CFrame = camera.CFrame * CFrame.new(math.sin(timeNow * 37) * shake, math.cos(timeNow * 31) * shake, 0)

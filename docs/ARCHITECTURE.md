@@ -1,6 +1,6 @@
 # Architecture
 
-Resonance Field uses a Rojo layout with a clear server/client/shared split.
+ArrayWave Visualizer uses a Rojo layout with a clear server/client/shared split.
 
 ```text
 src/shared -> ReplicatedStorage/Shared
@@ -25,14 +25,16 @@ Server modules own replicated state:
 Client controllers own presentation and input:
 
 - `AudioController` produces audio frames in Demo, Asset, or Mic mode.
-- `ResonanceController` updates local-only field tiles, orbit points, shockwave ring, and speaker overlays.
+- `ResonanceController` creates and updates the local-only ArrayWave visualizer under `Workspace/ArrayWaveClientVisuals`.
+- Visual child folders are `GridArray`, `RowBars`, `RadialCircle`, `Shockwaves`, and `DebugMarkers`.
+- The visualizer pools 21x21 grid tiles, 64 row bars, 96 radial bars, and six reusable shockwave rings.
 - `CameraController` frames the sculpture and applies clamped FOV feedback.
 - `UIController` builds the compact generated UI.
 - `InputController` binds keys and sends narrow marble requests.
 
 ## Audio Boundary
 
-Audio analysis is local presentation state. Spectrum, RMS, peak, beat, microphone state, and asset loudness are not sent to the server.
+Audio analysis is local presentation state. Spectrum, RMS, peak, beat, microphone state, and asset loudness are not sent to the server. The client only sends a marble request when the player explicitly requests one.
 
 ## Remote Boundary
 

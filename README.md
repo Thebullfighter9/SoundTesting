@@ -1,6 +1,6 @@
-# SoundTesting: Resonance Field
+# SoundTesting: ArrayWave Visualizer
 
-Resonance Field is a minimal Roblox Luau audio physics visualizer: a quiet gallery installation where a tiled speaker-membrane sculpture responds to a demo signal, asset audio, or microphone analyzer data when available.
+ArrayWave Visualizer is a focused Roblox Luau audio visualizer demo. Demo, asset, or microphone analyzer data drives three clear client-local visual forms: a dense grid array, a classic row of bars, and a radial circle with expanding sound waves.
 
 It exists as a scripting portfolio piece. There are no rounds, quests, NPCs, coins, XP, lore systems, monetization, or DataStores.
 
@@ -10,7 +10,12 @@ It exists as a scripting portfolio piece. There are no rounds, quests, NPCs, coi
 - `D`: Demo mode
 - `M`: try Mic mode
 - `A`: play the current asset ID
-- `V`: cycle visual style
+- `V`: cycle visualizer mode
+- `1`: Grid mode
+- `2`: Row mode
+- `3`: Circle mode
+- `4`: All mode
+- `5`: Minimal mode
 - `E`: drop a server-validated resonance marble
 - `R`: reset camera framing
 
@@ -19,9 +24,9 @@ It exists as a scripting portfolio piece. There are no rounds, quests, NPCs, coi
 - Demo mode animates immediately and needs no external assets.
 - Asset mode attempts a modular Roblox audio graph, then falls back to local `Sound` loudness.
 - Mic mode attempts modular microphone analysis and falls back cleanly if unavailable.
-- Visual styles: Field, Orbit, Marbles, Minimal.
+- Visualizer modes: Grid, Row, Circle, All, Minimal.
 - Server-built matte gallery environment with a 17x17 anchor grid.
-- Local-only tiled field, shockwave ring, orbit points, and subtle speaker pulses.
+- Local-only 21x21 grid array, 64 row bars, 96 radial circle bars, and pooled shockwaves.
 - One narrow client-to-server remote for rate-limited marble spawning.
 - Generated UI kept small, bottom-left, and secondary to the sculpture.
 
@@ -33,7 +38,7 @@ It exists as a scripting portfolio piece. There are no rounds, quests, NPCs, coi
 - Explicit `Init()` and `Start()` lifecycle.
 - Local audio analysis with privacy-preserving networking.
 - Server-side remote validation and rate limiting.
-- Low-instance-count visual updates with no per-frame allocation.
+- Pooled visualizer parts with no per-frame allocation.
 - Maid-style cleanup helpers.
 
 ## Run With Rojo
@@ -46,7 +51,7 @@ Connect Roblox Studio to the Rojo server and press Play.
 
 ## Demo Mode
 
-Demo mode generates a synthetic audio frame every render step. It creates smooth bands, RMS, peak, bass, and beat values so the field moves immediately in the first few seconds.
+Demo mode generates a synthetic audio frame every render step. It creates changing bands, RMS, peak, bass, and beat values so Grid, Row, and Circle modes visibly animate in the first few seconds.
 
 ## Asset Mode
 
@@ -84,6 +89,6 @@ Audio frames, microphone state, spectrum data, RMS, peak, bass, and beat values 
 
 ## Performance Notes
 
-The field visuals are created once and updated in place from one render connection. UI readouts are throttled. The server only handles limited marble spawns and cleanup.
+The visualizer instances are created once under `Workspace/ArrayWaveClientVisuals` and updated in place from one render connection. UI readouts are throttled. The server only handles limited marble spawns and cleanup.
 
 ## Screenshots

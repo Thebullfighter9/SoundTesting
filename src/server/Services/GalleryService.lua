@@ -201,7 +201,7 @@ local function buildSpeakers(staticFolder: Folder)
 end
 
 local function buildAnchors(anchorFolder: Folder)
-	local gridSize = Constants.FIELD_GRID_SIZE
+	local gridSize = Constants.GALLERY_ANCHOR_GRID_SIZE
 	local spacing = 1.55
 	local origin = (gridSize - 1) * spacing * -0.5
 
