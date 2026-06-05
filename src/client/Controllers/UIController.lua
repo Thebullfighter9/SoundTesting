@@ -75,6 +75,15 @@ local function findButton(parent: Instance, name: string): TextButton
 	return expectChild(parent, name, "TextButton") :: TextButton
 end
 
+local function findOptionalButton(parent: Instance, name: string): TextButton?
+	local child = parent:FindFirstChild(name)
+	if child ~= nil and child:IsA("TextButton") then
+		return child
+	end
+
+	return nil
+end
+
 local function setText(label: any, text: string)
 	if label ~= nil then
 		label.Text = text
@@ -417,7 +426,9 @@ local function bindStaticUi()
 	songHighlightUntil = os.clock() + 3.25
 
 	local compactPlayBase = findButton(collapsed, "CompactPlayBaseButton")
-	compactDemoButton = findButton(collapsed, "CompactDemoButton")
+	compactDemoButton = findOptionalButton(collapsed, "CompactDemoButton") or findOptionalButton(collapsed, "CompactCameraButton")
+	assert(compactDemoButton ~= nil, "ArrayWaveGui missing CompactDemoButton")
+	(compactDemoButton :: TextButton).Text = "Demo"
 	currentModeButton = findButton(collapsed, "CurrentModeButton")
 	tuneButton = findButton(collapsed, "TuneButton")
 

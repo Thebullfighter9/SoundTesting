@@ -50,6 +50,7 @@ type BandMotionState = {
 
 type GridTileState = {
 	part: BasePart,
+	basePosition: Vector3,
 	xIndex: number,
 	zIndex: number,
 	normalizedX: number,
@@ -398,6 +399,7 @@ local function createGrid(center: Vector3)
 
 			table.insert(gridTiles, {
 				part = tile,
+				basePosition = basePosition,
 				xIndex = column,
 				zIndex = row,
 				normalizedX = normalizedX,
