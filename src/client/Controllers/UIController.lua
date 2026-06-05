@@ -10,7 +10,6 @@ local Constants = require((Shared:WaitForChild("Constants") :: ModuleScript))
 local Network = Shared:WaitForChild("Network")
 local RemoteNames = require((Network:WaitForChild("RemoteNames") :: ModuleScript))
 local Util = Shared:WaitForChild("Util")
-local InstanceUtil = require((Util:WaitForChild("InstanceUtil") :: ModuleScript))
 local Maid = require((Util:WaitForChild("Maid") :: ModuleScript))
 local NumberUtil = require((Util:WaitForChild("NumberUtil") :: ModuleScript))
 
@@ -24,6 +23,7 @@ local screenGui: ScreenGui? = nil
 local dock: Frame? = nil
 local dockStroke: UIStroke? = nil
 local statusLabel: TextLabel? = nil
+local sourceLabel: TextLabel? = nil
 local tuningLabel: TextLabel? = nil
 local assetBox: TextBox? = nil
 local marbleRemote: RemoteEvent? = nil
@@ -35,27 +35,29 @@ local activeAudioButton = "PlayBase"
 local glow = 0
 
 local palette = Constants.PALETTE
+local analyzerBars: { Frame } = {}
 local visualButtons: { [string]: TextButton } = {}
 local audioButtons: { [string]: TextButton } = {}
 local buttonStrokes: { [TextButton]: UIStroke } = {}
 local selectedButtons: { [TextButton]: boolean } = {}
 local focusedButtons: { [TextButton]: boolean } = {}
 local hoveredButtons: { [TextButton]: boolean } = {}
+local dropMarbleButton: TextButton? = nil
 
-local function textConstraint(parent: Instance, minSize: number, maxSize: number)
-	InstanceUtil.create("UITextSizeConstraint", {
-		MinTextSize = minSize,
-		MaxTextSize = maxSize,
-	}, parent)
+local function expectChild(parent: Instance, name: string, className: string): Instance
+	local child = parent:WaitForChild(name, 8)
+	assert(child ~= nil, `ArrayWaveGui missing {name}`)
+	assert(child.ClassName == className, `ArrayWaveGui {name} must be {className}`)
+	return child
 end
 
-local function buttonName(text: string): string
-	local compact = string.gsub(text, "%W+", "")
-	if compact == "" then
-		return "Button"
+local function getStroke(button: TextButton): UIStroke?
+	local stroke = button:FindFirstChildOfClass("UIStroke")
+	if stroke ~= nil then
+		return stroke
 	end
 
-	return compact .. "Button"
+	return nil
 end
 
 local function setText(label: TextLabel?, text: string)
@@ -96,20 +98,23 @@ local function updateButtonVisual(button: TextButton)
 	local stroke = buttonStrokes[button]
 
 	if selected then
-		button.BackgroundColor3 = palette.Cyan:Lerp(palette.Charcoal, 0.55)
-		button.TextColor3 = palette.SoftWhite
-	elseif hovered or focused then
-		button.BackgroundColor3 = Color3.fromRGB(32, 36, 37)
-		button.TextColor3 = palette.SoftWhite
+		button.BackgroundColor3 = palette.Cyan:Lerp(palette.SurfaceRaised, 0.54)
+		button.BackgroundTransparency = 0.08
+		button.TextColor3 = palette.Text
+	elseif focused or hovered then
+		button.BackgroundColor3 = palette.SurfaceRaised:Lerp(palette.Cyan, 0.08)
+		button.BackgroundTransparency = 0.04
+		button.TextColor3 = palette.Text
 	else
-		button.BackgroundColor3 = Color3.fromRGB(22, 25, 26)
-		button.TextColor3 = Color3.fromRGB(202, 211, 208)
+		button.BackgroundColor3 = palette.SurfaceRaised
+		button.BackgroundTransparency = 0.16
+		button.TextColor3 = palette.TextMuted:Lerp(palette.Text, 0.38)
 	end
 
 	if stroke ~= nil then
-		stroke.Color = if selected or focused then palette.Cyan else Color3.fromRGB(86, 96, 96)
-		stroke.Transparency = if selected then 0.18 elseif focused then 0.28 elseif hovered then 0.48 else 0.68
-		stroke.Thickness = if selected or focused then 1.4 else 1
+		stroke.Color = if selected or focused then palette.Cyan else palette.Stroke
+		stroke.Transparency = if selected then 0.14 elseif focused then 0.22 elseif hovered then 0.42 else 0.66
+		stroke.Thickness = if selected or focused then 1.3 else 1
 	end
 end
 
@@ -122,48 +127,10 @@ local function setButtonSelected(button: TextButton?, selected: boolean)
 	updateButtonVisual(button)
 end
 
-local function createLabel(parent: Instance, name: string, text: string, height: number, color: Color3, font: Enum.Font): TextLabel
-	local label = InstanceUtil.create("TextLabel", {
-		Name = name,
-		BackgroundTransparency = 1,
-		Font = font,
-		Size = UDim2.new(1, 0, 0, height),
-		Text = text,
-		TextColor3 = color,
-		TextScaled = true,
-		TextTruncate = Enum.TextTruncate.AtEnd,
-		TextXAlignment = Enum.TextXAlignment.Left,
-	}, parent) :: TextLabel
-	textConstraint(label, 9, height)
-	return label
-end
+local function bindButton(button: TextButton, activated: () -> ())
+	buttonStrokes[button] = getStroke(button)
+	updateButtonVisual(button)
 
-local function createButton(parent: Instance, text: string, activated: () -> ()): TextButton
-	local button = InstanceUtil.create("TextButton", {
-		Name = buttonName(text),
-		AutoButtonColor = false,
-		BackgroundColor3 = Color3.fromRGB(22, 25, 26),
-		BorderSizePixel = 0,
-		Font = Enum.Font.GothamMedium,
-		Selectable = true,
-		Size = UDim2.new(1, 0, 0, 30),
-		Text = text,
-		TextColor3 = Color3.fromRGB(202, 211, 208),
-		TextScaled = true,
-	}, parent) :: TextButton
-
-	InstanceUtil.create("UICorner", {
-		CornerRadius = UDim.new(0, 5),
-	}, button)
-
-	local stroke = InstanceUtil.create("UIStroke", {
-		Color = Color3.fromRGB(86, 96, 96),
-		Thickness = 1,
-		Transparency = 0.68,
-	}, button) :: UIStroke
-	buttonStrokes[button] = stroke
-
-	textConstraint(button, 9, 13)
 	maid:Give(button.Activated:Connect(activated))
 	maid:Give(button.SelectionGained:Connect(function()
 		focusedButtons[button] = true
@@ -181,26 +148,6 @@ local function createButton(parent: Instance, text: string, activated: () -> ())
 		hoveredButtons[button] = nil
 		updateButtonVisual(button)
 	end))
-
-	return button
-end
-
-local function createRow(parent: Instance, name: string, columns: number, height: number): Frame
-	local row = InstanceUtil.create("Frame", {
-		Name = name,
-		BackgroundTransparency = 1,
-		Size = UDim2.new(1, 0, 0, height),
-	}, parent) :: Frame
-
-	InstanceUtil.create("UIGridLayout", {
-		CellPadding = UDim2.fromOffset(5, 0),
-		CellSize = UDim2.new(1 / columns, -math.ceil(5 * (columns - 1) / columns), 1, 0),
-		FillDirection = Enum.FillDirection.Horizontal,
-		FillDirectionMaxCells = columns,
-		SortOrder = Enum.SortOrder.LayoutOrder,
-	}, row)
-
-	return row
 end
 
 local function showStatus(text: string, seconds: number?)
@@ -217,7 +164,7 @@ end
 local function currentEnergy(): number
 	local audio = context.AudioController
 	local frame = audio:GetFrame()
-	return math.clamp(math.max(frame.peak, frame.bass, frame.rms) * 1.05, 0, 1)
+	return math.clamp(math.max(frame.peak, frame.bass, frame.rms, frame.beatStrength), 0, 1)
 end
 
 local function requestMarble()
@@ -249,6 +196,44 @@ local function requestMarble()
 	end
 end
 
+local function sourceText(): string
+	local audio = context.AudioController
+	local mode = audio:GetMode()
+	if mode == "Asset" then
+		if activeAudioButton == "PlayBase" then
+			return `Source: {Constants.DEFAULT_AUDIO_LABEL}`
+		end
+		return "Source: Asset"
+	elseif mode == "Mic" then
+		return "Source: Mic"
+	end
+	return "Source: Demo"
+end
+
+local function updateAnalyzerBars()
+	local audio = context.AudioController
+	local frame = audio:GetFrame()
+	local bands = frame.bands
+	local bandTotal = math.max(1, #bands)
+	local barTotal = math.max(1, #analyzerBars)
+
+	for barIndex, bar in ipairs(analyzerBars) do
+		local startIndex = math.floor((barIndex - 1) / barTotal * bandTotal) + 1
+		local endIndex = math.max(startIndex, math.floor(barIndex / barTotal * bandTotal))
+		local total = 0
+		local samples = 0
+		for bandIndex = startIndex, endIndex do
+			total += math.clamp(NumberUtil.sanitizeFiniteNumber(bands[bandIndex], 0), 0, 1)
+			samples += 1
+		end
+		local value = if samples > 0 then total / samples else 0
+		local heightScale = math.clamp(0.08 + value * 0.92, 0.08, 1)
+		bar.Size = UDim2.new(1, 0, heightScale, 0)
+		bar.BackgroundTransparency = math.clamp(0.28 - value * 0.16 + frame.air * 0.04, 0.1, 0.42)
+		bar.BackgroundColor3 = palette.Cyan:Lerp(palette.CyanSoft, math.clamp(frame.centroid * 0.45 + value * 0.22, 0, 0.62))
+	end
+end
+
 local function updateSelections()
 	local audio = context.AudioController
 	local resonance = context.ResonanceController
@@ -275,6 +260,7 @@ end
 local function updateReadouts()
 	local audio = context.AudioController
 	local resonance = context.ResonanceController
+	local frame = audio:GetFrame()
 	local statusText = audio:GetStatus()
 
 	if statusOverride ~= "" and os.clock() < statusOverrideUntil then
@@ -288,198 +274,163 @@ local function updateReadouts()
 		local lower = string.lower(statusText)
 		statusLabel.TextColor3 = if string.find(lower, "unavailable") or string.find(lower, "invalid") or string.find(lower, "limited")
 			then palette.Amber
-			else palette.Cyan
+			else palette.CyanSoft
 	end
 
+	setText(sourceLabel, sourceText())
 	setText(
 		tuningLabel,
 		string.format(
-			"%s  Sens %.2f  Int %.2f",
+			"%s  Sens %.2f  Int %.2f  Beat %.2f",
 			resonance:GetStyle(),
 			audio:GetSensitivity(),
-			resonance:GetIntensity()
+			resonance:GetIntensity(),
+			frame.beatStrength
 		)
 	)
+	updateAnalyzerBars()
 	updateSelections()
 end
 
-local function buildUi()
-	local playerGui = LocalPlayer:WaitForChild("PlayerGui")
-	local existingArrayWave = playerGui:FindFirstChild("ArrayWaveGui")
-	if existingArrayWave ~= nil then
-		existingArrayWave:Destroy()
+local function collectAnalyzerBars(analyzerFrame: Frame)
+	table.clear(analyzerBars)
+
+	for index = 1, Constants.UI_ANALYZER_BAR_COUNT do
+		local holder = expectChild(analyzerFrame, `Band_{index}`, "Frame") :: Frame
+		local fill = expectChild(holder, "Fill", "Frame") :: Frame
+		table.insert(analyzerBars, fill)
 	end
+end
 
-	local gui = InstanceUtil.create("ScreenGui", {
-		Name = "ArrayWaveGui",
-		ResetOnSpawn = false,
-		IgnoreGuiInset = false,
-		ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
-		DisplayOrder = 10,
-	}, playerGui) :: ScreenGui
+local function findButton(parent: Instance, name: string): TextButton
+	return expectChild(parent, name, "TextButton") :: TextButton
+end
+
+local function bindStaticUi()
+	local playerGui = LocalPlayer:WaitForChild("PlayerGui")
+	local gui = expectChild(playerGui, "ArrayWaveGui", "ScreenGui") :: ScreenGui
+	local dockFrame = expectChild(gui, "ControlDock", "Frame") :: Frame
+
 	screenGui = gui
-	maid:Give(gui)
+	dock = dockFrame
+	dockStroke = dockFrame:FindFirstChildOfClass("UIStroke")
+	statusLabel = expectChild(dockFrame, "Status", "TextLabel") :: TextLabel
+	sourceLabel = expectChild(dockFrame, "Source", "TextLabel") :: TextLabel
+	tuningLabel = expectChild(dockFrame, "Tuning", "TextLabel") :: TextLabel
+	assetBox = expectChild(dockFrame, "AssetIdBox", "TextBox") :: TextBox
 
-	local viewportWidth = if workspace.CurrentCamera ~= nil then workspace.CurrentCamera.ViewportSize.X else 1280
-	local dockWidth = if viewportWidth < 700 then 282 else 320
-	local scale = if viewportWidth < 700 then 0.92 else 1
-	dock = InstanceUtil.create("Frame", {
-		Name = "ControlDock",
-		AutomaticSize = Enum.AutomaticSize.Y,
-		AnchorPoint = Vector2.new(0, 1),
-		BackgroundColor3 = Color3.fromRGB(12, 14, 15),
-		BackgroundTransparency = 0.2,
-		BorderSizePixel = 0,
-		Position = UDim2.new(0, 14, 1, -14),
-		Size = UDim2.fromOffset(dockWidth, 0),
-	}, gui) :: Frame
+	gui.Enabled = true
+	gui.ResetOnSpawn = false
+	assetBox.Text = Constants.DEFAULT_AUDIO_ASSET_ID
 
-	InstanceUtil.create("UICorner", {
-		CornerRadius = UDim.new(0, 8),
-	}, dock)
+	local analyzerFrame = expectChild(dockFrame, "AnalyzerStrip", "Frame") :: Frame
+	collectAnalyzerBars(analyzerFrame)
 
-	dockStroke = InstanceUtil.create("UIStroke", {
-		Color = palette.Cyan,
-		Thickness = 1,
-		Transparency = 0.58,
-	}, dock) :: UIStroke
+	local baseRow = expectChild(dockFrame, "BaseRow", "Frame")
+	audioButtons.PlayBase = findButton(baseRow, "PlayBaseButton")
+	audioButtons.Demo = findButton(baseRow, "DemoButton")
+	audioButtons.Mic = findButton(baseRow, "MicButton")
 
-	InstanceUtil.create("UIScale", {
-		Scale = scale,
-	}, dock)
+	local assetRow = expectChild(dockFrame, "AssetRow", "Frame")
+	audioButtons.PlayAsset = findButton(assetRow, "PlayAssetButton")
+	local stopButton = findButton(assetRow, "StopButton")
 
-	InstanceUtil.create("UIPadding", {
-		PaddingBottom = UDim.new(0, 10),
-		PaddingLeft = UDim.new(0, 10),
-		PaddingRight = UDim.new(0, 10),
-		PaddingTop = UDim.new(0, 10),
-	}, dock)
+	local visualRowA = expectChild(dockFrame, "VisualizerRowA", "Frame")
+	visualButtons.Grid = findButton(visualRowA, "GridButton")
+	visualButtons.Row = findButton(visualRowA, "RowButton")
+	visualButtons.Circle = findButton(visualRowA, "CircleButton")
 
-	InstanceUtil.create("UIListLayout", {
-		Padding = UDim.new(0, 6),
-		SortOrder = Enum.SortOrder.LayoutOrder,
-	}, dock)
+	local visualRowB = expectChild(dockFrame, "VisualizerRowB", "Frame")
+	visualButtons.All = findButton(visualRowB, "AllButton")
+	visualButtons.Minimal = findButton(visualRowB, "MinimalButton")
 
-	createLabel(dock, "Title", "ArrayWave", 18, palette.SoftWhite, Enum.Font.GothamMedium)
-	statusLabel = createLabel(dock, "Status", "Base song: " .. Constants.DEFAULT_AUDIO_ASSET_ID, 16, palette.Cyan, Enum.Font.Gotham)
+	local tuneRowA = expectChild(dockFrame, "TuneRowA", "Frame")
+	local sensMinus = findButton(tuneRowA, "SensMinusButton")
+	local sensPlus = findButton(tuneRowA, "SensPlusButton")
 
-	local baseRow = createRow(dock, "BaseRow", 3, 30)
-	audioButtons.PlayBase = createButton(baseRow, "Play Base", function()
+	local tuneRowB = expectChild(dockFrame, "TuneRowB", "Frame")
+	local intMinus = findButton(tuneRowB, "IntMinusButton")
+	local intPlus = findButton(tuneRowB, "IntPlusButton")
+
+	local actionRow = expectChild(dockFrame, "ActionRow", "Frame")
+	local pulseTest = findButton(actionRow, "PulseTestButton")
+	local resetView = findButton(actionRow, "ResetViewButton")
+	dropMarbleButton = findButton(actionRow, "DropMarbleButton")
+	dropMarbleButton.Visible = getMarbleRemote() ~= nil
+
+	bindButton(audioButtons.PlayBase, function()
 		activeAudioButton = "PlayBase"
 		context.AudioController:PlayBaseSong()
 		clearStatusOverride()
 		updateReadouts()
 	end)
-	audioButtons.Demo = createButton(baseRow, "Demo", function()
+	bindButton(audioButtons.Demo, function()
 		activeAudioButton = "Demo"
 		context.AudioController:SetMode("Demo")
 		clearStatusOverride()
 		updateReadouts()
 	end)
-	audioButtons.Mic = createButton(baseRow, "Mic", function()
+	bindButton(audioButtons.Mic, function()
 		activeAudioButton = "Mic"
 		context.AudioController:SetMode("Mic")
 		clearStatusOverride()
 		updateReadouts()
 	end)
-
-	assetBox = InstanceUtil.create("TextBox", {
-		Name = "AssetIdBox",
-		BackgroundColor3 = Color3.fromRGB(18, 21, 22),
-		BorderSizePixel = 0,
-		ClearTextOnFocus = false,
-		Font = Enum.Font.Gotham,
-		PlaceholderText = "audio asset id",
-		Selectable = true,
-		Size = UDim2.new(1, 0, 0, 30),
-		Text = Constants.DEFAULT_AUDIO_ASSET_ID,
-		TextColor3 = palette.SoftWhite,
-		TextScaled = true,
-		TextXAlignment = Enum.TextXAlignment.Left,
-	}, dock) :: TextBox
-	textConstraint(assetBox, 10, 14)
-	InstanceUtil.create("UICorner", {
-		CornerRadius = UDim.new(0, 5),
-	}, assetBox)
-	InstanceUtil.create("UIStroke", {
-		Color = Color3.fromRGB(86, 96, 96),
-		Thickness = 1,
-		Transparency = 0.64,
-	}, assetBox)
-	InstanceUtil.create("UIPadding", {
-		PaddingLeft = UDim.new(0, 8),
-		PaddingRight = UDim.new(0, 8),
-	}, assetBox)
-
-	local assetRow = createRow(dock, "AssetRow", 2, 30)
-	audioButtons.PlayAsset = createButton(assetRow, "Play Asset", function()
+	bindButton(audioButtons.PlayAsset, function()
 		activeAudioButton = "PlayAsset"
 		local box = assetBox
 		context.AudioController:PlayAsset(if box ~= nil then box.Text else "")
 		clearStatusOverride()
 		updateReadouts()
 	end)
-	createButton(assetRow, "Stop", function()
+	bindButton(stopButton, function()
 		activeAudioButton = "Demo"
 		context.AudioController:Stop()
 		clearStatusOverride()
 		updateReadouts()
 	end)
 
-	local visualRowA = createRow(dock, "VisualizerRowA", 3, 30)
-	for _, styleName in ipairs({ "Grid", "Row", "Circle" }) do
+	for styleName, button in pairs(visualButtons) do
 		local capturedStyle = styleName
-		visualButtons[capturedStyle] = createButton(visualRowA, capturedStyle, function()
+		bindButton(button, function()
 			context.ResonanceController:SetStyle(capturedStyle)
 			updateReadouts()
 		end)
 	end
 
-	local visualRowB = createRow(dock, "VisualizerRowB", 2, 30)
-	for _, styleName in ipairs({ "All", "Minimal" }) do
-		local capturedStyle = styleName
-		visualButtons[capturedStyle] = createButton(visualRowB, capturedStyle, function()
-			context.ResonanceController:SetStyle(capturedStyle)
-			updateReadouts()
-		end)
-	end
-
-	local tuneRowA = createRow(dock, "TuneRowA", 2, 30)
-	createButton(tuneRowA, "Sens -", function()
+	bindButton(sensMinus, function()
 		local audio = context.AudioController
 		audio:SetSensitivity(audio:GetSensitivity() - 0.12)
 		updateReadouts()
 	end)
-	createButton(tuneRowA, "Sens +", function()
+	bindButton(sensPlus, function()
 		local audio = context.AudioController
 		audio:SetSensitivity(audio:GetSensitivity() + 0.12)
 		updateReadouts()
 	end)
-
-	local tuneRowB = createRow(dock, "TuneRowB", 2, 30)
-	createButton(tuneRowB, "Int -", function()
+	bindButton(intMinus, function()
 		local resonance = context.ResonanceController
 		resonance:SetIntensity(resonance:GetIntensity() - 0.12)
 		updateReadouts()
 	end)
-	createButton(tuneRowB, "Int +", function()
+	bindButton(intPlus, function()
 		local resonance = context.ResonanceController
 		resonance:SetIntensity(resonance:GetIntensity() + 0.12)
 		updateReadouts()
 	end)
-
-	local actionColumns = if getMarbleRemote() ~= nil then 2 else 1
-	local actionRow = createRow(dock, "ActionRow", actionColumns, 30)
-	createButton(actionRow, "Pulse Test", function()
-		context.ResonanceController:TriggerPulse(0.85)
-		glow = math.max(glow, 0.6)
+	bindButton(pulseTest, function()
+		context.ResonanceController:TriggerPulse(1)
+		glow = math.max(glow, 0.72)
 		showStatus("Pulse test")
 	end)
-	if actionColumns == 2 then
-		createButton(actionRow, "Drop Marble", requestMarble)
+	bindButton(resetView, function()
+		context.CameraController:Reset()
+		showStatus("View reset")
+	end)
+	if dropMarbleButton ~= nil then
+		bindButton(dropMarbleButton, requestMarble)
 	end
 
-	tuningLabel = createLabel(dock, "Tuning", "Grid  Sens 1.00  Int 1.00", 15, Color3.fromRGB(158, 170, 168), Enum.Font.Gotham)
 	updateReadouts()
 end
 
@@ -498,11 +449,11 @@ function UIController:Start()
 	end
 
 	started = true
-	buildUi()
+	bindStaticUi()
 
 	local disconnect = context.AudioController:OnFrameChanged(function()
 		local now = os.clock()
-		if now - lastReadoutUpdate < 0.12 then
+		if now - lastReadoutUpdate < 0.055 then
 			return
 		end
 
@@ -515,7 +466,7 @@ function UIController:Start()
 		glow = NumberUtil.expSmooth(glow, 0, deltaTime, 6)
 		local stroke = dockStroke
 		if stroke ~= nil then
-			stroke.Transparency = 0.58 - math.clamp(glow * 0.2, 0, 0.2)
+			stroke.Transparency = 0.54 - math.clamp(glow * 0.2, 0, 0.2)
 		end
 	end))
 end
@@ -541,8 +492,10 @@ function UIController:Destroy()
 	screenGui = nil
 	dock = nil
 	statusLabel = nil
+	sourceLabel = nil
 	tuningLabel = nil
 	assetBox = nil
+	dropMarbleButton = nil
 end
 
 return UIController

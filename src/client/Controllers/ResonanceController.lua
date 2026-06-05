@@ -22,12 +22,16 @@ type GridTile = {
 	basePosition: Vector3,
 	radius: number,
 	angle: number,
+	centerWeight: number,
+	edgeWeight: number,
 }
 
 type RowBar = {
 	part: BasePart,
+	peakPart: BasePart,
 	index: number,
 	basePosition: Vector3,
+	peakHeight: number,
 }
 
 type CircleBar = {
@@ -46,6 +50,13 @@ type ShockwaveRing = {
 	active: boolean,
 }
 
+type AccentLight = {
+	part: BasePart,
+	light: PointLight,
+	angle: number,
+	radius: number,
+}
+
 local ResonanceController = {}
 
 local initialized = false
@@ -56,29 +67,40 @@ local gridTiles: { GridTile } = {}
 local rowBars: { RowBar } = {}
 local circleBars: { CircleBar } = {}
 local shockwaves: { ShockwaveRing } = {}
-local debugMarkers: { BasePart } = {}
+local accentLights: { AccentLight } = {}
 local style: VisualStyle = Constants.DEFAULT_VISUAL_STYLE :: VisualStyle
 local intensity = Constants.DEFAULT_INTENSITY
 local warnedMissingGallery = false
 local lastBeatTime = 0
 local shockwaveCursor = 1
+local pulseAge = 10
+local pulseStrength = 0
 
 local rootFolder: Folder? = nil
 local gridFolder: Folder? = nil
 local rowFolder: Folder? = nil
 local circleFolder: Folder? = nil
 local shockwaveFolder: Folder? = nil
-local debugFolder: Folder? = nil
+local accentFolder: Folder? = nil
 
 local palette = Constants.PALETTE
 local fallbackCenter = Vector3.new(0, 3, 0)
 local visualCenter = fallbackCenter
+local audioBandCount = Constants.AUDIO_BAND_COUNT or Constants.VISUAL_BAND_COUNT
 
 local SAFE_FRAME: AudioFrame = {
 	rms = 0.2,
 	peak = 0.32,
 	bass = 0.24,
+	lowMid = 0.18,
+	mid = 0.14,
+	high = 0.08,
+	air = 0.04,
 	beat = false,
+	beatStrength = 0,
+	transient = 0,
+	spectralFlux = 0,
+	centroid = 0.35,
 	bands = {},
 	time = 0,
 }
@@ -90,6 +112,10 @@ local function getRenderSignal(): RBXScriptSignal
 	end
 
 	return RunService.RenderStepped
+end
+
+local function clamp01(value: any): number
+	return math.clamp(NumberUtil.sanitizeFiniteNumber(value, 0), 0, 1)
 end
 
 local function createVisualPart(parent: Instance, name: string, props: { [string]: any }): BasePart
@@ -151,7 +177,7 @@ local function getOrCreateRootFolder(): Folder
 	rowFolder = createFolder(root, "RowBars")
 	circleFolder = createFolder(root, "RadialCircle")
 	shockwaveFolder = createFolder(root, "Shockwaves")
-	debugFolder = createFolder(root, "DebugMarkers")
+	accentFolder = createFolder(root, "AccentLights")
 	maid:Give(root)
 
 	return root
@@ -169,15 +195,28 @@ local function setFolderVisible(folder: Folder?, visible: boolean)
 				baseTransparency = 0
 			end
 			descendant.Transparency = if visible then baseTransparency else 1
+		elseif descendant:IsA("PointLight") then
+			local baseBrightness = descendant:GetAttribute("BaseBrightness")
+			if typeof(baseBrightness) ~= "number" then
+				baseBrightness = descendant.Brightness
+			end
+			descendant.Brightness = if visible then baseBrightness else 0
 		end
 	end
 end
 
 local function updateVisibility()
-	setFolderVisible(gridFolder, style == "Grid" or style == "All" or style == "Minimal")
-	setFolderVisible(rowFolder, style == "Row" or style == "All")
-	setFolderVisible(circleFolder, style == "Circle" or style == "All" or style == "Minimal")
-	setFolderVisible(shockwaveFolder, style == "Grid" or style == "Circle" or style == "All" or style == "Minimal")
+	local showGrid = style == "Grid" or style == "All" or style == "Minimal"
+	local showRow = style == "Row" or style == "All"
+	local showCircle = style == "Circle" or style == "All" or style == "Minimal"
+	local showShock = style == "Grid" or style == "Circle" or style == "All" or style == "Minimal"
+	local showAccent = style == "Grid" or style == "Row" or style == "Circle" or style == "All"
+
+	setFolderVisible(gridFolder, showGrid)
+	setFolderVisible(rowFolder, showRow)
+	setFolderVisible(circleFolder, showCircle)
+	setFolderVisible(shockwaveFolder, showShock)
+	setFolderVisible(accentFolder, showAccent)
 end
 
 local function createGrid(center: Vector3)
@@ -185,6 +224,7 @@ local function createGrid(center: Vector3)
 	local gridSize = Constants.GRID_SIZE
 	local spacing = Constants.GRID_SPACING
 	local origin = (gridSize - 1) * spacing * -0.5
+	local gridCenter = (gridSize + 1) * 0.5
 
 	for row = 1, gridSize do
 		for column = 1, gridSize do
@@ -192,14 +232,16 @@ local function createGrid(center: Vector3)
 			local z = origin + (row - 1) * spacing
 			local localPosition = Vector3.new(x, 0, z)
 			local basePosition = center + Vector3.new(x, 0, z)
+			local normalizedDistance = math.sqrt((row - gridCenter) ^ 2 + (column - gridCenter) ^ 2) / gridCenter
+			local centerWeight = math.clamp(1 - normalizedDistance, 0, 1)
 			local tile = createVisualPart(folder, `Grid_{row}_{column}`, {
 				CFrame = CFrame.new(basePosition),
-				Size = Vector3.new(0.86, 0.14, 0.86),
-				Color = palette.SoftWhite:Lerp(palette.Cyan, 0.16),
+				Size = Vector3.new(0.78, 0.12, 0.78),
+				Color = palette.Text:Lerp(palette.Cyan, 0.12),
 				Material = Enum.Material.Neon,
-				Transparency = 0.08,
+				Transparency = 0.12,
 			})
-			tile:SetAttribute("BaseTransparency", 0.08)
+			tile:SetAttribute("BaseTransparency", 0.12)
 
 			table.insert(gridTiles, {
 				part = tile,
@@ -208,6 +250,8 @@ local function createGrid(center: Vector3)
 				basePosition = basePosition,
 				radius = localPosition.Magnitude,
 				angle = math.atan2(z, x),
+				centerWeight = centerWeight,
+				edgeWeight = 1 - centerWeight,
 			})
 		end
 	end
@@ -215,26 +259,39 @@ end
 
 local function createRowBars(center: Vector3)
 	local folder = assert(rowFolder, "Row folder missing")
+	local accents = assert(accentFolder, "Accent folder missing")
+	local peakFolder = createFolder(accents, "RowPeakCaps")
 	local count = Constants.ROW_BAR_COUNT
-	local spacing = 0.72
+	local spacing = 0.5
 	local origin = (count - 1) * spacing * -0.5
-	local rowBase = center + Vector3.new(0, 0.15, 18)
+	local rowBase = center + Vector3.new(0, 0.15, 17.2)
 
 	for index = 1, count do
 		local position = rowBase + Vector3.new(origin + (index - 1) * spacing, 0, 0)
 		local bar = createVisualPart(folder, `RowBar_{index}`, {
-			CFrame = CFrame.new(position + Vector3.new(0, 0.5, 0)),
-			Size = Vector3.new(0.38, 1, 0.62),
-			Color = palette.SoftWhite:Lerp(palette.Cyan, 0.3),
+			CFrame = CFrame.new(position + Vector3.new(0, 0.42, 0)),
+			Size = Vector3.new(0.3, 0.84, 0.54),
+			Color = palette.Text:Lerp(palette.Cyan, 0.26),
 			Material = Enum.Material.Neon,
 			Transparency = 0.1,
 		})
 		bar:SetAttribute("BaseTransparency", 0.1)
 
+		local peakPart = createVisualPart(peakFolder, `PeakCap_{index}`, {
+			CFrame = CFrame.new(position + Vector3.new(0, 1.1, 0)),
+			Size = Vector3.new(0.32, 0.08, 0.58),
+			Color = palette.CyanSoft,
+			Material = Enum.Material.Neon,
+			Transparency = 0.22,
+		})
+		peakPart:SetAttribute("BaseTransparency", 0.22)
+
 		table.insert(rowBars, {
 			part = bar,
+			peakPart = peakPart,
 			index = index,
 			basePosition = position,
+			peakHeight = 0.8,
 		})
 	end
 end
@@ -242,21 +299,21 @@ end
 local function createRadialCircle(center: Vector3)
 	local folder = assert(circleFolder, "Circle folder missing")
 	local count = Constants.CIRCLE_BAR_COUNT
-	local radius = 13.5
+	local radius = 12.4
 
 	for index = 1, count do
 		local alpha = (index - 1) / count
 		local angle = alpha * math.pi * 2
 		local direction = Vector3.new(math.cos(angle), 0, math.sin(angle))
-		local position = center + direction * radius + Vector3.new(0, 2.4, 0)
+		local position = center + direction * radius + Vector3.new(0, 2.55, 0)
 		local bar = createVisualPart(folder, `CircleBar_{index}`, {
 			CFrame = CFrame.lookAt(position, position + direction),
-			Size = Vector3.new(0.18, 0.44, 1.55),
-			Color = palette.SoftWhite:Lerp(palette.Cyan, 0.36),
+			Size = Vector3.new(0.14, 0.4, 1.28),
+			Color = palette.Text:Lerp(palette.Cyan, 0.34),
 			Material = Enum.Material.Neon,
-			Transparency = 0.12,
+			Transparency = 0.14,
 		})
-		bar:SetAttribute("BaseTransparency", 0.12)
+		bar:SetAttribute("BaseTransparency", 0.14)
 
 		table.insert(circleBars, {
 			part = bar,
@@ -278,10 +335,10 @@ local function createShockwaves(center: Vector3)
 			local alpha = (segmentIndex - 1) / Constants.SHOCKWAVE_SEGMENT_COUNT
 			local angle = alpha * math.pi * 2
 			local direction = Vector3.new(math.cos(angle), 0, math.sin(angle))
-			local position = center + direction * 6 + Vector3.new(0, 2.15, 0)
+			local position = center + direction * 6 + Vector3.new(0, 2.2, 0)
 			local segment = createVisualPart(ringFolder, `Segment_{segmentIndex}`, {
 				CFrame = CFrame.lookAt(position, position + direction),
-				Size = Vector3.new(0.1, 0.08, 1.1),
+				Size = Vector3.new(0.09, 0.06, 0.96),
 				Color = palette.Cyan,
 				Material = Enum.Material.Neon,
 				Transparency = 1,
@@ -300,30 +357,52 @@ local function createShockwaves(center: Vector3)
 	end
 end
 
-local function createDebugMarkers(center: Vector3)
-	local folder = assert(debugFolder, "Debug folder missing")
-	local marker = createVisualPart(folder, "Center", {
-		CFrame = CFrame.new(center),
-		Size = Vector3.new(0.45, 0.45, 0.45),
-		Shape = Enum.PartType.Ball,
-		Color = palette.Amber,
-		Material = Enum.Material.SmoothPlastic,
-		Transparency = 1,
-	})
-	marker:SetAttribute("BaseTransparency", 1)
-	table.insert(debugMarkers, marker)
+local function createAccentLights(center: Vector3)
+	local folder = assert(accentFolder, "Accent folder missing")
+	local glintFolder = createFolder(folder, "Glints")
+	for index = 1, Constants.ACCENT_LIGHT_COUNT do
+		local alpha = (index - 1) / Constants.ACCENT_LIGHT_COUNT
+		local angle = alpha * math.pi * 2
+		local radius = 8 + (index % 3) * 3.5
+		local position = center + Vector3.new(math.cos(angle) * radius, 2.2, math.sin(angle) * radius)
+		local part = createVisualPart(glintFolder, `Accent_{index}`, {
+			CFrame = CFrame.new(position),
+			Size = Vector3.new(0.18, 0.18, 0.18),
+			Shape = Enum.PartType.Ball,
+			Color = palette.CyanSoft,
+			Material = Enum.Material.Neon,
+			Transparency = 0.78,
+		})
+		part:SetAttribute("BaseTransparency", 0.78)
+		local light = InstanceUtil.create("PointLight", {
+			Name = "Glow",
+			Brightness = 0.2,
+			Color = palette.CyanSoft,
+			Range = 7,
+			Shadows = false,
+		}, part) :: PointLight
+		light:SetAttribute("BaseBrightness", 0.2)
+
+		table.insert(accentLights, {
+			part = part,
+			light = light,
+			angle = angle,
+			radius = radius,
+		})
+	end
 end
 
 local function synthesizeBands(frame: AudioFrame): { number }
-	local bands = table.create(Constants.VISUAL_BAND_COUNT, 0)
+	local bands = table.create(audioBandCount, 0)
 	local timeNow = if frame.time > 0 then frame.time else os.clock()
 	local energy = math.clamp(math.max(frame.rms, frame.peak * 0.85, 0.22), 0, 1)
 
-	for index = 1, Constants.VISUAL_BAND_COUNT do
-		local alpha = (index - 1) / Constants.VISUAL_BAND_COUNT
+	for index = 1, audioBandCount do
+		local alpha = (index - 1) / audioBandCount
 		local wave = (math.sin(timeNow * 3.8 + alpha * math.pi * 5.5) + 1) * 0.5
-		local bassShape = math.max(0, 1 - alpha * 2.3) * frame.bass
-		bands[index] = math.clamp(energy * (0.34 + wave * 0.42) + bassShape * 0.44, 0, 1)
+		local shimmer = (math.sin(timeNow * 12 + alpha * math.pi * 22) + 1) * 0.5
+		local bassShape = math.max(0, 1 - alpha * 3) * frame.bass
+		bands[index] = math.clamp(energy * (0.22 + wave * 0.28 + shimmer * alpha * 0.12) + bassShape * 0.48, 0, 1)
 	end
 
 	return bands
@@ -350,7 +429,7 @@ local function getSafeFrame(): AudioFrame
 	local bands = audioFrame.bands
 	local hasUsefulBand = false
 	if typeof(bands) == "table" then
-		for index = 1, math.min(#bands, Constants.VISUAL_BAND_COUNT) do
+		for index = 1, math.min(#bands, audioBandCount) do
 			if NumberUtil.sanitizeFiniteNumber(bands[index], 0) > 0.01 then
 				hasUsefulBand = true
 				break
@@ -359,10 +438,18 @@ local function getSafeFrame(): AudioFrame
 	end
 
 	local cleanFrame: AudioFrame = {
-		rms = math.clamp(NumberUtil.sanitizeFiniteNumber(audioFrame.rms, 0), 0, 1),
-		peak = math.clamp(NumberUtil.sanitizeFiniteNumber(audioFrame.peak, 0), 0, 1),
-		bass = math.clamp(NumberUtil.sanitizeFiniteNumber(audioFrame.bass, 0), 0, 1),
+		rms = clamp01(audioFrame.rms),
+		peak = clamp01(audioFrame.peak),
+		bass = clamp01(audioFrame.bass),
+		lowMid = clamp01(audioFrame.lowMid),
+		mid = clamp01(audioFrame.mid),
+		high = clamp01(audioFrame.high),
+		air = clamp01(audioFrame.air),
 		beat = audioFrame.beat == true,
+		beatStrength = clamp01(audioFrame.beatStrength),
+		transient = clamp01(audioFrame.transient),
+		spectralFlux = clamp01(audioFrame.spectralFlux),
+		centroid = clamp01(audioFrame.centroid),
 		bands = if hasUsefulBand then bands else {},
 		time = NumberUtil.sanitizeFiniteNumber(audioFrame.time, os.clock()),
 	}
@@ -376,9 +463,9 @@ end
 
 local function getBand(frame: AudioFrame, index: number): number
 	local bands = frame.bands
-	local bandCount = math.max(1, #bands)
-	local value = bands[((index - 1) % bandCount) + 1]
-	return math.clamp(NumberUtil.sanitizeFiniteNumber(value, 0), 0, 1)
+	local count = math.max(1, #bands)
+	local value = bands[((index - 1) % count) + 1]
+	return clamp01(value)
 end
 
 local function activateShockwave(strength: number)
@@ -393,67 +480,88 @@ local function activateShockwave(strength: number)
 	end
 
 	ring.age = 0
-	ring.strength = math.clamp(strength, 0.25, 1)
+	ring.strength = math.clamp(strength, 0.18, 1)
 	ring.active = true
+	pulseAge = 0
+	pulseStrength = math.max(pulseStrength, ring.strength)
 end
 
 local function updateGrid(frame: AudioFrame, energy: number)
-	local gridCenter = (Constants.GRID_SIZE + 1) * 0.5
 	local timeNow = frame.time
 	local minimal = style == "Minimal"
 	local visible = style == "Grid" or style == "All" or style == "Minimal"
+	local pulse = math.clamp(1 - pulseAge / 0.45, 0, 1) * pulseStrength
+	local centroidEdge = math.clamp(frame.centroid, 0, 1)
 
 	for index, tile in ipairs(gridTiles) do
-		local band = getBand(frame, index + tile.row * 3 + tile.column)
-		local centerDistance = math.sqrt((tile.row - gridCenter) ^ 2 + (tile.column - gridCenter) ^ 2) / gridCenter
-		local radialDelay = tile.radius * 0.72
-		local ripple = (math.sin(timeNow * 5.2 - radialDelay + tile.angle * 0.35) + 1) * 0.5
-		local bassWeight = math.clamp(1 - centerDistance * 0.75, 0.08, 1)
-		local lift = (band * 3.8 + ripple * energy * 2.2 + frame.bass * bassWeight * 2.8) * intensity
+		local band = getBand(frame, index + tile.row * 5 + tile.column * 2)
+		local dome = frame.bass * tile.centerWeight * (3.4 + pulse * 2.8)
+		local diagonal = (math.sin(timeNow * 5.1 + (tile.row + tile.column) * 0.34) + 1) * 0.5 * frame.lowMid * 2.2
+		local midRipple = (math.sin(timeNow * 4.2 - tile.radius * 0.56 + tile.angle * 1.4) + 1) * 0.5 * frame.mid * 1.8
+		local beatRipple = math.max(0, 1 - math.abs(tile.radius - pulseAge * 46) / 4.2) * pulse * 4.2
+		local highShimmer = (math.sin(timeNow * 18 + tile.angle * 7 + index) + 1) * 0.5 * frame.high * tile.edgeWeight * (0.7 + centroidEdge)
+		local lift = (band * (1.8 + centroidEdge) + dome + diagonal + midRipple + beatRipple + highShimmer) * intensity
 		if minimal then
-			lift *= 0.35
+			lift *= 0.32
 		end
 
-		local height = math.clamp(0.18 + band * 0.28 + energy * 0.12, 0.14, 0.62)
-		tile.part.Size = Vector3.new(0.86, height, 0.86)
+		local height = math.clamp(0.14 + band * 0.32 + frame.transient * 0.16 + highShimmer * 0.12, 0.12, 0.72)
+		local brightness = math.clamp(band * 0.3 + frame.high * tile.edgeWeight * 0.28 + pulse * tile.centerWeight * 0.22 + frame.air * tile.edgeWeight * 0.18, 0, if minimal then 0.22 else 0.74)
+		local transparency = if minimal then 0.48 else math.clamp(0.16 - brightness * 0.1, 0.06, 0.2)
+
+		tile.part.Size = Vector3.new(0.78, height, 0.78)
 		tile.part.CFrame = CFrame.new(tile.basePosition + Vector3.new(0, lift + height * 0.5, 0))
-		tile.part.Color = palette.SoftWhite:Lerp(palette.Cyan, math.clamp(band * 0.42 + energy * 0.18, 0, if minimal then 0.16 else 0.58))
-		local transparency = if minimal then 0.42 else 0.08
+		tile.part.Color = palette.Text:Lerp(palette.CyanSoft, brightness)
 		tile.part.Transparency = if visible then transparency else 1
 		tile.part:SetAttribute("BaseTransparency", transparency)
 	end
 end
 
-local function updateRow(frame: AudioFrame, energy: number)
+local function updateRow(frame: AudioFrame, _energy: number, deltaTime: number)
 	local visible = style == "Row" or style == "All"
 	for _, rowBar in ipairs(rowBars) do
-		local leftBias = 1 - ((rowBar.index - 1) / math.max(1, Constants.ROW_BAR_COUNT - 1))
-		local centerDistance = math.abs(rowBar.index - (Constants.ROW_BAR_COUNT + 1) * 0.5) / (Constants.ROW_BAR_COUNT * 0.5)
-		local band = getBand(frame, rowBar.index)
-		local bassBoost = frame.bass * math.max(leftBias, 1 - centerDistance) * 1.6
-		local height = math.clamp(0.7 + (band * 8.5 + bassBoost * 4 + frame.peak * 1.3) * intensity, 0.7, 12)
+		local alpha = (rowBar.index - 1) / math.max(1, Constants.ROW_BAR_COUNT - 1)
+		local band = getBand(frame, math.floor(alpha * audioBandCount) + 1)
+		local leftWeight = math.max(0, 1 - alpha * 2.8)
+		local centerWeight = math.max(0, 1 - math.abs(alpha - 0.44) * 3)
+		local rightWeight = alpha ^ 1.6
+		local body = frame.bass * leftWeight * 3.5 + frame.lowMid * centerWeight * 3 + frame.mid * 2.4 + frame.high * rightWeight * 2.2
+		local variation = (math.sin(frame.time * 4.5 + alpha * math.pi * 7) + 1) * 0.5 * frame.mid
+		local height = math.clamp(0.55 + (band * 8.2 + body + variation + frame.peak * 1.1) * intensity, 0.55, 13.5)
 
-		rowBar.part.Size = Vector3.new(0.38, height, 0.62)
+		rowBar.peakHeight = math.max(height + 0.28, rowBar.peakHeight - deltaTime * (4.2 + frame.spectralFlux * 5))
+		rowBar.part.Size = Vector3.new(0.3, height, 0.54)
 		rowBar.part.CFrame = CFrame.new(rowBar.basePosition + Vector3.new(0, height * 0.5, 0))
-		rowBar.part.Color = palette.SoftWhite:Lerp(palette.Cyan, math.clamp(band * 0.55 + frame.peak * 0.14, 0, 0.64))
-		rowBar.part.Transparency = if visible then 0.08 else 1
-		rowBar.part:SetAttribute("BaseTransparency", 0.08)
+		rowBar.part.Color = palette.Text:Lerp(palette.Cyan, math.clamp(band * 0.44 + frame.mid * 0.18 + rightWeight * frame.high * 0.2, 0, 0.72))
+		rowBar.part.Transparency = if visible then 0.1 else 1
+		rowBar.part:SetAttribute("BaseTransparency", 0.1)
+
+		rowBar.peakPart.CFrame = CFrame.new(rowBar.basePosition + Vector3.new(0, rowBar.peakHeight, 0))
+		rowBar.peakPart.Transparency = if visible then math.clamp(0.22 - frame.spectralFlux * 0.08, 0.1, 0.34) else 1
+		rowBar.peakPart:SetAttribute("BaseTransparency", rowBar.peakPart.Transparency)
 	end
 end
 
 local function updateCircle(frame: AudioFrame, energy: number)
 	local visible = style == "Circle" or style == "All" or style == "Minimal"
-	for _, circleBar in ipairs(circleBars) do
-		local band = getBand(frame, circleBar.index * 2)
-		local wave = (math.sin(frame.time * 4.5 + circleBar.angle * 5) + 1) * 0.5
-		local extension = math.clamp((band * 5.2 + frame.peak * 1.2 + wave * energy * 1.5) * intensity, 0.45, 7.5)
-		local yLift = 2.4 + frame.bass * 1.1
-		local position = visualCenter + Vector3.new(0, yLift, 0) + circleBar.direction * (circleBar.baseRadius + extension * 0.5)
+	local pulse = math.clamp(1 - pulseAge / 0.45, 0, 1) * pulseStrength
+	local bassRadius = frame.bass * 1.8 + pulse * 1.2
+	local centroidPush = frame.centroid * 1.4
 
-		circleBar.part.Size = Vector3.new(0.18, 0.44 + band * 0.42, 1.2 + extension)
+	for _, circleBar in ipairs(circleBars) do
+		local alpha = (circleBar.index - 1) / math.max(1, Constants.CIRCLE_BAR_COUNT - 1)
+		local band = getBand(frame, math.floor(alpha * audioBandCount) + 1)
+		local phase = (math.sin(frame.time * 5.4 + circleBar.angle * 6) + 1) * 0.5
+		local highTip = (frame.high * 0.8 + frame.air * 0.65) * (0.5 + phase * 0.5)
+		local extension = math.clamp((band * 4.8 + frame.mid * 2 + highTip * 2.4 + energy * 1.2) * intensity, 0.35, 8.2)
+		local radius = circleBar.baseRadius + bassRadius + centroidPush + extension * 0.5
+		local yLift = 2.52 + frame.lowMid * 0.8 + pulse * 0.45
+		local position = visualCenter + Vector3.new(0, yLift, 0) + circleBar.direction * radius
+
+		circleBar.part.Size = Vector3.new(0.14, 0.38 + highTip * 0.42, 1.05 + extension)
 		circleBar.part.CFrame = CFrame.lookAt(position, position + circleBar.direction)
-		circleBar.part.Color = palette.SoftWhite:Lerp(palette.Cyan, math.clamp(band * 0.52 + energy * 0.18, 0, 0.68))
-		local transparency = if style == "Minimal" then 0.42 else 0.12
+		circleBar.part.Color = palette.Text:Lerp(palette.CyanSoft, math.clamp(band * 0.4 + highTip * 0.3 + pulse * 0.16, 0, 0.76))
+		local transparency = if style == "Minimal" then 0.48 else math.clamp(0.16 - highTip * 0.08, 0.07, 0.2)
 		circleBar.part.Transparency = if visible then transparency else 1
 		circleBar.part:SetAttribute("BaseTransparency", transparency)
 	end
@@ -463,7 +571,7 @@ local function updateShockwaves(deltaTime: number)
 	local visible = style == "Grid" or style == "Circle" or style == "All" or style == "Minimal"
 	for _, ring in ipairs(shockwaves) do
 		if ring.active then
-			ring.age += deltaTime / 0.45
+			ring.age += deltaTime / 0.52
 			if ring.age >= 1 then
 				ring.active = false
 				for _, segment in ipairs(ring.segments) do
@@ -472,16 +580,16 @@ local function updateShockwaves(deltaTime: number)
 				end
 			else
 				local alpha = 1 - ring.age
-				local radius = 7 + ring.age * 24
-				local visibleScale = if style == "Minimal" then 0.25 else 0.55
-				local transparency = math.clamp(1 - alpha * ring.strength * visibleScale, 0.38, 1)
+				local radius = 6 + ring.age * 28
+				local visibleScale = if style == "Minimal" then 0.2 else 0.5
+				local transparency = math.clamp(1 - alpha * ring.strength * visibleScale, 0.42, 1)
 				for index, segment in ipairs(ring.segments) do
 					local segmentAlpha = (index - 1) / #ring.segments
 					local angle = segmentAlpha * math.pi * 2
 					local direction = Vector3.new(math.cos(angle), 0, math.sin(angle))
 					local position = visualCenter + Vector3.new(0, 2.25 + alpha * 0.9, 0) + direction * radius
 					segment.CFrame = CFrame.lookAt(position, position + direction)
-					segment.Size = Vector3.new(0.12, 0.08, 1.05 + alpha * 1.2)
+					segment.Size = Vector3.new(0.1, 0.07, 0.92 + alpha * 1.45)
 					segment.Transparency = if visible then transparency else 1
 					segment:SetAttribute("BaseTransparency", transparency)
 				end
@@ -490,23 +598,49 @@ local function updateShockwaves(deltaTime: number)
 	end
 end
 
+local function updateAccentLights(frame: AudioFrame)
+	local visible = style == "Grid" or style == "Row" or style == "Circle" or style == "All"
+	for index, accent in ipairs(accentLights) do
+		local phase = (math.sin(frame.time * (1.5 + index * 0.07) + accent.angle * 3) + 1) * 0.5
+		local airGlow = (frame.air * 0.7 + frame.high * 0.34 + frame.spectralFlux * 0.22) * phase
+		local position = visualCenter
+			+ Vector3.new(
+				math.cos(accent.angle + frame.time * 0.04) * accent.radius,
+				2.2 + phase * 0.8 + frame.bass * 0.5,
+				math.sin(accent.angle + frame.time * 0.04) * accent.radius
+			)
+		accent.part.CFrame = CFrame.new(position)
+		accent.part.Transparency = if visible then math.clamp(0.86 - airGlow * 0.34, 0.48, 0.92) else 1
+		accent.part:SetAttribute("BaseTransparency", accent.part.Transparency)
+		accent.light.Brightness = if visible then math.clamp(0.08 + airGlow * 0.75, 0.05, 0.85) else 0
+		accent.light:SetAttribute("BaseBrightness", accent.light.Brightness)
+	end
+end
+
 local function updateVisuals(deltaTime: number)
 	local frame = getSafeFrame()
-	local energy = math.clamp((frame.rms * 0.65 + frame.peak * 0.3 + frame.bass * 0.24) * intensity, 0, 1)
+	local cleanDelta = math.clamp(NumberUtil.sanitizeFiniteNumber(deltaTime, 1 / 60), 1 / 240, 0.2)
+	local energy = math.clamp((frame.rms * 0.42 + frame.peak * 0.22 + frame.bass * 0.22 + frame.mid * 0.16 + frame.high * 0.12) * intensity, 0, 1)
+	pulseAge += cleanDelta
+	pulseStrength = NumberUtil.expSmooth(pulseStrength, 0, cleanDelta, 4.5)
 
 	if frame.beat and frame.time - lastBeatTime > 0.08 then
 		lastBeatTime = frame.time
-		activateShockwave(math.max(frame.peak, frame.bass, 0.35))
+		activateShockwave(math.max(frame.beatStrength, frame.bass * 0.65, frame.spectralFlux * 0.8, 0.32))
+	elseif frame.spectralFlux > 0.5 and frame.transient > 0.18 and frame.time - lastBeatTime > 0.22 then
+		lastBeatTime = frame.time
+		activateShockwave(math.max(frame.spectralFlux, frame.transient, 0.25))
 	end
 
 	updateGrid(frame, energy)
-	updateRow(frame, energy)
+	updateRow(frame, energy, cleanDelta)
 	updateCircle(frame, energy)
-	updateShockwaves(deltaTime)
+	updateShockwaves(cleanDelta)
+	updateAccentLights(frame)
 
 	local camera = context and context.CameraController
 	if camera ~= nil and typeof(camera.Update) == "function" then
-		camera:Update(deltaTime, frame, style)
+		camera:Update(cleanDelta, frame, style)
 	end
 end
 
@@ -529,10 +663,10 @@ function ResonanceController:Start()
 	visualCenter = center
 	getOrCreateRootFolder()
 	createGrid(center)
+	createAccentLights(center)
 	createRowBars(center)
 	createRadialCircle(center)
 	createShockwaves(center)
-	createDebugMarkers(center)
 	updateVisibility()
 
 	maid:Give(getRenderSignal():Connect(updateVisuals))
@@ -574,21 +708,25 @@ function ResonanceController:GetStyle(): VisualStyle
 end
 
 function ResonanceController:TriggerPulse(strength: number)
-	activateShockwave(strength)
+	activateShockwave(math.clamp(NumberUtil.sanitizeFiniteNumber(strength, 0.85), 0.1, 1))
 end
 
 function ResonanceController:TriggerPulseTest()
 	self:TriggerPulse(0.85)
 end
 
-function ResonanceController:GetDebugCounts(): { [string]: number }
+function ResonanceController:GetCurrentVisualStats(): { [string]: number }
 	return {
 		GridArray = #gridTiles,
 		RowBars = #rowBars,
 		RadialCircle = #circleBars,
 		Shockwaves = #shockwaves,
-		DebugMarkers = #debugMarkers,
+		AccentLights = #accentLights,
 	}
+end
+
+function ResonanceController:GetDebugCounts(): { [string]: number }
+	return self:GetCurrentVisualStats()
 end
 
 function ResonanceController:Destroy()

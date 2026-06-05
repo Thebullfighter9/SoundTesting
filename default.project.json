@@ -2,6 +2,9 @@
   "name": "SoundTesting",
   "tree": {
     "$className": "DataModel",
+    "ReplicatedFirst": {
+      "$path": "src/replicatedfirst"
+    },
     "ReplicatedStorage": {
       "Shared": {
         "$path": "src/shared"
@@ -11,6 +14,9 @@
       "Server": {
         "$path": "src/server"
       }
+    },
+    "StarterGui": {
+      "$path": "src/startergui"
     },
     "StarterPlayer": {
       "StarterPlayerScripts": {

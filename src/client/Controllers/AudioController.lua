@@ -28,19 +28,31 @@ local mode: AudioMode = Constants.DEFAULT_AUDIO_MODE :: AudioMode
 local status = "Base song ready"
 local sensitivity = Constants.DEFAULT_SENSITIVITY
 local demoTime = 0
-local rollingEnergy = 0.12
+local shortEnvelope = 0.08
+local longEnvelope = 0.08
+local beatThreshold = 0.22
 local lastBeatTime = 0
 local audioAttemptSerial = 0
 local assetAnalyzer: AudioAnalyzer? = nil
 local micAnalyzer: AudioAnalyzer? = nil
 local classicSound: Sound? = nil
 
-local smoothedBands: { number } = table.create(Constants.VISUAL_BAND_COUNT, 0)
+local bandCount = Constants.AUDIO_BAND_COUNT or Constants.VISUAL_BAND_COUNT
+local smoothedBands: { number } = table.create(bandCount, 0)
+local previousBands: { number } = table.create(bandCount, 0)
 local currentFrame: AudioFrame = {
 	rms = 0,
 	peak = 0,
 	bass = 0,
+	lowMid = 0,
+	mid = 0,
+	high = 0,
+	air = 0,
 	beat = false,
+	beatStrength = 0,
+	transient = 0,
+	spectralFlux = 0,
+	centroid = 0,
 	bands = smoothedBands,
 	time = 0,
 }
@@ -52,6 +64,10 @@ local function getRenderSignal(): RBXScriptSignal
 	end
 
 	return RunService.RenderStepped
+end
+
+local function clamp01(value: any): number
+	return math.clamp(NumberUtil.sanitizeFiniteNumber(value, 0), 0, 1)
 end
 
 local function setStatus(nextStatus: string)
@@ -71,10 +87,6 @@ local function notifyFrameChanged()
 	for _, callback in ipairs(callbacks) do
 		callback(currentFrame)
 	end
-end
-
-local function makeBands(value: number): { number }
-	return table.create(Constants.VISUAL_BAND_COUNT, value)
 end
 
 local function readNumberProperty(instance: any, propertyName: string, fallback: number): number
@@ -101,7 +113,7 @@ local function createAudioFolder(): Folder
 
 	local playerGui = LocalPlayer:WaitForChild("PlayerGui")
 	local folder = InstanceUtil.create("Folder", {
-		Name = "ResonanceAudio",
+		Name = "ArrayWaveAudio",
 	}, playerGui) :: Folder
 
 	audioMaid:Give(folder)
@@ -134,7 +146,6 @@ local function setAudioPlayerContent(audioPlayer: AudioPlayer, assetId: string):
 		if numericAssetId == nil then
 			error("invalid asset id")
 		end
-
 		(audioPlayer :: any).AudioContent = (Content :: any).fromAssetId(numericAssetId)
 	end)
 	if okContent then
@@ -160,27 +171,37 @@ local function setAudioPlayerContent(audioPlayer: AudioPlayer, assetId: string):
 	end)
 end
 
-local function createWire(parent: Instance, source: Instance, target: Instance): Wire
-	return InstanceUtil.create("Wire", {
-		Name = `{source.Name}_To_{target.Name}`,
-		SourceInstance = source,
-		SourceName = "Output",
-		TargetInstance = target,
-		TargetName = "Input",
-	}, parent) :: Wire
+local function createWire(parent: Instance, source: Instance, target: Instance): boolean
+	return pcall(function()
+		InstanceUtil.create("Wire", {
+			Name = `{source.Name}_To_{target.Name}`,
+			SourceInstance = source,
+			SourceName = "Output",
+			TargetInstance = target,
+			TargetName = "Input",
+		}, parent)
+	end)
 end
 
-local function bandsFromSpectrum(spectrum: { any }, rms: number, peak: number): { number }
-	if #spectrum == 0 then
-		return makeBands(math.max(rms, peak * 0.8))
-	end
-
-	local bands = table.create(Constants.VISUAL_BAND_COUNT, 0)
+local function resampleSpectrum(spectrum: { any }, rms: number, peak: number, timeNow: number): { number }
+	local bands = table.create(bandCount, 0)
 	local sourceCount = #spectrum
 
-	for bandIndex = 1, Constants.VISUAL_BAND_COUNT do
-		local startIndex = math.max(1, math.floor((bandIndex - 1) / Constants.VISUAL_BAND_COUNT * sourceCount) + 1)
-		local endIndex = math.max(startIndex, math.floor(bandIndex / Constants.VISUAL_BAND_COUNT * sourceCount))
+	if sourceCount == 0 then
+		local energy = math.max(rms, peak * 0.78, 0.05)
+		for index = 1, bandCount do
+			local alpha = (index - 1) / math.max(1, bandCount - 1)
+			local slow = (math.sin(timeNow * 2.4 + alpha * math.pi * 4.8) + 1) * 0.5
+			local highPulse = (math.sin(timeNow * 12.5 + alpha * math.pi * 22) + 1) * 0.5
+			local bassShape = math.max(0, 1 - alpha * 3.2)
+			bands[index] = clamp01(energy * (0.22 + slow * 0.28 + highPulse * alpha * 0.16 + bassShape * 0.42))
+		end
+		return bands
+	end
+
+	for bandIndex = 1, bandCount do
+		local startIndex = math.max(1, math.floor((bandIndex - 1) / bandCount * sourceCount) + 1)
+		local endIndex = math.max(startIndex, math.floor(bandIndex / bandCount * sourceCount))
 		local total = 0
 		local samples = 0
 
@@ -196,29 +217,104 @@ local function bandsFromSpectrum(spectrum: { any }, rms: number, peak: number): 
 			samples += 1
 		end
 
-		bands[bandIndex] = math.clamp((if samples > 0 then total / samples else 0) * sensitivity, 0, 1)
+		bands[bandIndex] = clamp01((if samples > 0 then total / samples else 0) * sensitivity)
 	end
 
 	return bands
 end
 
-local function synthesizeBands(rms: number, peak: number, timeNow: number): { number }
-	local bands = table.create(Constants.VISUAL_BAND_COUNT, 0)
-	local energy = math.clamp(math.max(rms, peak * 0.82) * sensitivity, 0, 1)
+local function averageRange(bands: { number }, startAlpha: number, endAlpha: number): number
+	local first = math.max(1, math.floor(startAlpha * bandCount) + 1)
+	local last = math.clamp(math.floor(endAlpha * bandCount), first, bandCount)
+	local total = 0
+	local samples = 0
 
-	for index = 1, Constants.VISUAL_BAND_COUNT do
-		local alpha = (index - 1) / Constants.VISUAL_BAND_COUNT
-		local wave = (math.sin(timeNow * 3.5 + alpha * math.pi * 5.5) + 1) * 0.5
-		local quietShape = 0.45 + wave * 0.38 + math.max(0, 1 - alpha * 2.4) * 0.24
-		bands[index] = math.clamp(energy * quietShape, 0, 1)
+	for index = first, last do
+		total += clamp01(bands[index] or 0)
+		samples += 1
 	end
 
-	return bands
+	return if samples > 0 then total / samples else 0
+end
+
+local function applyAnalysis(rawBands: { number }, rawRms: number, rawPeak: number, deltaTime: number)
+	local now = os.clock()
+	local cleanDelta = math.clamp(NumberUtil.sanitizeFiniteNumber(deltaTime, 1 / 60), 1 / 240, 0.2)
+	local sanitizedRms = clamp01(rawRms)
+	local sanitizedPeak = clamp01(math.max(rawPeak, sanitizedRms))
+	local fluxTotal = 0
+	local centroidNumerator = 0
+	local energyTotal = 0
+
+	for index = 1, bandCount do
+		local alpha = (index - 1) / math.max(1, bandCount - 1)
+		local target = clamp01((rawBands[index] or 0) * sensitivity)
+		local current = smoothedBands[index] or 0
+		local attack = 20 - alpha * 8
+		local release = 3.8 + alpha * 5.5
+		local speed = if target > current then attack else release
+		if alpha < 0.18 then
+			speed *= 0.72
+		elseif alpha > 0.72 then
+			speed *= 1.24
+		end
+
+		local nextValue = NumberUtil.expSmooth(current, target, cleanDelta, speed)
+		smoothedBands[index] = nextValue
+		fluxTotal += math.max(0, nextValue - (previousBands[index] or 0))
+		previousBands[index] = nextValue
+		centroidNumerator += nextValue * alpha
+		energyTotal += nextValue
+	end
+
+	local bass = averageRange(smoothedBands, 0, 0.14)
+	local lowMid = averageRange(smoothedBands, 0.14, 0.34)
+	local mid = averageRange(smoothedBands, 0.34, 0.62)
+	local high = averageRange(smoothedBands, 0.62, 0.84)
+	local air = averageRange(smoothedBands, 0.84, 1)
+	local bandEnergy = math.clamp(energyTotal / math.max(1, bandCount), 0, 1)
+	local rms = clamp01(math.max(sanitizedRms, bandEnergy * 0.82, bass * 0.42))
+	local peak = clamp01(math.max(sanitizedPeak, rms, bass * 0.9, high * 0.72))
+	local centroid = if energyTotal > 0.0001 then math.clamp(centroidNumerator / energyTotal, 0, 1) else 0
+	local spectralFlux = math.clamp(fluxTotal / math.max(1, bandCount) * 8, 0, 1)
+
+	shortEnvelope = NumberUtil.expSmooth(shortEnvelope, math.max(peak, bass * 0.9, spectralFlux), cleanDelta, 18)
+	longEnvelope = NumberUtil.expSmooth(longEnvelope, math.max(rms, bandEnergy), cleanDelta, 1.55)
+	local transient = math.clamp((shortEnvelope - longEnvelope) * 2.8, 0, 1)
+	beatThreshold = NumberUtil.expSmooth(beatThreshold, math.clamp(longEnvelope + 0.16 + spectralFlux * 0.14, 0.16, 0.62), cleanDelta, 1.8)
+
+	local beatScore = math.max(transient * 0.82 + spectralFlux * 0.45, bass * 0.28 + peak * 0.22)
+	local beat = false
+	local beatStrength = 0
+	if beatScore > beatThreshold and now - lastBeatTime > 0.18 then
+		beat = true
+		beatStrength = math.clamp((beatScore - beatThreshold) / math.max(0.08, 1 - beatThreshold), 0.22, 1)
+		lastBeatTime = now
+	end
+
+	currentFrame = {
+		rms = rms,
+		peak = peak,
+		bass = clamp01(bass),
+		lowMid = clamp01(lowMid),
+		mid = clamp01(mid),
+		high = clamp01(high),
+		air = clamp01(air),
+		beat = beat,
+		beatStrength = beatStrength,
+		transient = transient,
+		spectralFlux = spectralFlux,
+		centroid = centroid,
+		bands = smoothedBands,
+		time = now,
+	}
+
+	notifyFrameChanged()
 end
 
 local function readAnalyzerFrame(analyzer: AudioAnalyzer, deltaTime: number)
-	local rms = math.clamp(readNumberProperty(analyzer, "RmsLevel", 0) * sensitivity, 0, 1)
-	local peak = math.clamp(readNumberProperty(analyzer, "PeakLevel", rms) * sensitivity, 0, 1)
+	local rms = clamp01(readNumberProperty(analyzer, "RmsLevel", 0) * sensitivity)
+	local peak = clamp01(readNumberProperty(analyzer, "PeakLevel", rms) * sensitivity)
 	local spectrum: { any } = {}
 
 	local okSpectrum, spectrumValues = pcall(function()
@@ -228,23 +324,13 @@ local function readAnalyzerFrame(analyzer: AudioAnalyzer, deltaTime: number)
 		spectrum = spectrumValues :: { any }
 	end
 
-	local bands = if #spectrum > 0 then bandsFromSpectrum(spectrum, rms, peak) else synthesizeBands(rms, peak, os.clock())
-	local bassTotal = 0
-	for index = 1, math.min(5, #bands) do
-		bassTotal += bands[index]
-	end
-
-	local bass = bassTotal / 5
-	AudioController:_ApplyRawFrame(bands, math.max(rms, bass * 0.55), math.max(peak, bass), bass, deltaTime)
+	applyAnalysis(resampleSpectrum(spectrum, rms, peak, os.clock()), rms, peak, deltaTime)
 end
 
 local function readClassicSoundFrame(sound: Sound, deltaTime: number)
-	local loudness = math.clamp(readNumberProperty(sound, "PlaybackLoudness", 0) / 950 * sensitivity, 0, 1)
-	local peak = math.clamp(loudness * 1.18, 0, 1)
-	local bands = synthesizeBands(loudness, peak, os.clock())
-	local bass = math.clamp((bands[1] + bands[2] + bands[3] + bands[4]) / 4, 0, 1)
-
-	AudioController:_ApplyRawFrame(bands, loudness, peak, bass, deltaTime)
+	local loudness = clamp01(readNumberProperty(sound, "PlaybackLoudness", 0) / 900 * sensitivity)
+	local peak = clamp01(loudness * 1.2)
+	applyAnalysis(resampleSpectrum({}, loudness, peak, os.clock()), loudness, peak, deltaTime)
 end
 
 local function scheduleAssetReadinessCheck(readReady: () -> boolean, unavailableStatus: string, attemptId: number)
@@ -255,7 +341,7 @@ local function scheduleAssetReadinessCheck(readReady: () -> boolean, unavailable
 				return
 			end
 
-			if readReady() or currentFrame.peak > 0.025 then
+			if readReady() or currentFrame.peak > 0.025 or currentFrame.spectralFlux > 0.025 then
 				return
 			end
 		end
@@ -277,7 +363,7 @@ local function tryModularAsset(assetId: string, unavailableStatus: string, attem
 		local audioPlayer = Instance.new("AudioPlayer")
 		audioPlayer.Name = "AssetAudioPlayer"
 		audioPlayer.Looping = true
-		audioPlayer.Volume = 0.55
+		audioPlayer.Volume = 0.58
 		pcall(function()
 			(audioPlayer :: any).AutoLoad = true
 		end)
@@ -302,13 +388,13 @@ local function tryModularAsset(assetId: string, unavailableStatus: string, attem
 				(output :: any).Player = LocalPlayer
 			end)
 			output.Parent = folder
-			pcall(function()
-				createWire(folder, audioPlayer, output)
-			end)
+			createWire(folder, audioPlayer, output)
 		end
 
 		assetAnalyzer = analyzer
-		audioPlayer:Play()
+		pcall(function()
+			audioPlayer:Play()
+		end)
 
 		scheduleAssetReadinessCheck(function(): boolean
 			local readyOk, ready = pcall(function()
@@ -334,7 +420,7 @@ local function tryClassicSound(assetId: string, unavailableStatus: string, attem
 		sound.Name = "ClassicAssetSound"
 		sound.SoundId = `rbxassetid://{assetId}`
 		sound.Looped = true
-		sound.Volume = 0.55
+		sound.Volume = 0.58
 		sound.Parent = folder
 		sound:Play()
 		classicSound = sound
@@ -422,67 +508,45 @@ local function tryMicInput(attemptId: number): boolean
 	return true
 end
 
-function AudioController:_ApplyRawFrame(rawBands: { number }, rawRms: number, rawPeak: number, rawBass: number, deltaTime: number)
-	local now = os.clock()
-	local attack = if rawPeak > currentFrame.peak then 18 else 6
-	local release = if rawRms > currentFrame.rms then 15 else 4
-
-	for index = 1, Constants.VISUAL_BAND_COUNT do
-		local target = math.clamp(rawBands[index] or 0, 0, 1)
-		local current = smoothedBands[index] or 0
-		local speed = if target > current then attack else release
-		smoothedBands[index] = NumberUtil.expSmooth(current, target, deltaTime, speed)
-	end
-
-	local rms = NumberUtil.expSmooth(currentFrame.rms, math.clamp(rawRms, 0, 1), deltaTime, release)
-	local peak = NumberUtil.expSmooth(currentFrame.peak, math.clamp(rawPeak, 0, 1), deltaTime, attack)
-	local bass = NumberUtil.expSmooth(currentFrame.bass, math.clamp(rawBass, 0, 1), deltaTime, attack)
-
-	rollingEnergy = NumberUtil.expSmooth(rollingEnergy, rms, deltaTime, 1.4)
-
-	local beat = false
-	local threshold = math.max(0.2, rollingEnergy + 0.15)
-	if (peak > threshold or bass > threshold + 0.08) and now - lastBeatTime > 0.22 then
-		beat = true
-		lastBeatTime = now
-	end
-
-	currentFrame = {
-		rms = rms,
-		peak = peak,
-		bass = bass,
-		beat = beat,
-		bands = smoothedBands,
-		time = now,
-	}
-
-	notifyFrameChanged()
+function AudioController:_ApplyRawFrame(rawBands: { number }, rawRms: number, rawPeak: number, _rawBass: number, deltaTime: number)
+	applyAnalysis(rawBands, rawRms, rawPeak, deltaTime)
 end
 
 function AudioController:_GenerateDemoFrame(deltaTime: number)
 	demoTime += deltaTime
 
 	local t = demoTime
-	local bands = table.create(Constants.VISUAL_BAND_COUNT, 0)
-	local kickWave = (math.sin(t * math.pi * 2 * 1.08) + 1) * 0.5
-	local kick = math.clamp((kickWave - 0.72) / 0.28, 0, 1)
-	local bassWave = (math.sin(t * math.pi * 2 * 0.27) + 1) * 0.5
-	local breath = (math.sin(t * math.pi * 2 * 0.08) + 1) * 0.5
+	local bands = table.create(bandCount, 0)
+	local kickPulse = math.max(0, math.sin(t * math.pi * 2 * 1.08)) ^ 9
+	local snarePulse = math.max(0, math.sin(t * math.pi * 2 * 0.54 + math.pi * 0.85)) ^ 10
+	local hatPulse = math.max(0, math.sin(t * math.pi * 2 * 4.35 + 0.4)) ^ 8
+	local groove = (math.sin(t * math.pi * 2 * 0.18) + 1) * 0.5
+	local bassSwell = (math.sin(t * math.pi * 2 * 0.27 + 0.3) + 1) * 0.5
 
-	for index = 1, Constants.VISUAL_BAND_COUNT do
-		local alpha = (index - 1) / Constants.VISUAL_BAND_COUNT
-		local noise = (math.noise(t * 0.55, alpha * 3.8, 0.1) + 1) * 0.5
-		local ripple = (math.sin(t * 3.6 + alpha * math.pi * 4.2) + 1) * 0.5
-		local bassWeight = math.max(0, 1 - alpha * 2.6)
-		local value = 0.07 + breath * 0.1 + bassWave * 0.16 + kick * bassWeight * 0.62 + ripple * noise * 0.18
-		bands[index] = math.clamp(value * sensitivity, 0, 1)
+	for index = 1, bandCount do
+		local alpha = (index - 1) / math.max(1, bandCount - 1)
+		local noise = (math.noise(t * 0.65, alpha * 8, 0.15) + 1) * 0.5
+		local motion = (math.sin(t * (2.4 + alpha * 5.8) + alpha * math.pi * 9) + 1) * 0.5
+		local bassShape = math.max(0, 1 - alpha * 4.4)
+		local lowMidShape = math.max(0, 1 - math.abs(alpha - 0.25) * 5)
+		local midShape = math.max(0, 1 - math.abs(alpha - 0.48) * 4)
+		local highShape = math.max(0, 1 - math.abs(alpha - 0.76) * 4.8)
+		local airShape = alpha ^ 4
+		local value = 0.025
+			+ groove * 0.04
+			+ bassSwell * bassShape * 0.18
+			+ kickPulse * bassShape * 0.78
+			+ kickPulse * lowMidShape * 0.18
+			+ snarePulse * (midShape * 0.52 + highShape * 0.2)
+			+ hatPulse * (highShape * 0.38 + airShape * 0.32)
+			+ motion * noise * (0.08 + alpha * 0.1)
+
+		bands[index] = clamp01(value)
 	end
 
-	local rms = math.clamp(0.12 + breath * 0.08 + bassWave * 0.16 + kick * 0.34, 0, 1)
-	local peak = math.clamp(rms + kick * 0.28 + bands[Constants.VISUAL_BAND_COUNT] * 0.06, 0, 1)
-	local bass = math.clamp((bands[1] + bands[2] + bands[3] + bands[4]) / 4, 0, 1)
-
-	self:_ApplyRawFrame(bands, rms, peak, bass, deltaTime)
+	local rms = clamp01(0.12 + groove * 0.08 + bassSwell * 0.12 + kickPulse * 0.36 + snarePulse * 0.12 + hatPulse * 0.06)
+	local peak = clamp01(rms + kickPulse * 0.28 + snarePulse * 0.18 + hatPulse * 0.12)
+	applyAnalysis(bands, rms, peak, deltaTime)
 end
 
 function AudioController:Init(_context: any)

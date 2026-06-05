@@ -1,0 +1,406 @@
+{
+  "Name": "ArrayWaveGui",
+  "ClassName": "ScreenGui",
+  "Properties": {
+    "DisplayOrder": 10,
+    "IgnoreGuiInset": false,
+    "ResetOnSpawn": false,
+    "ZIndexBehavior": "Sibling"
+  },
+  "Children": [
+    {
+      "Name": "ControlDock",
+      "ClassName": "Frame",
+      "Properties": {
+        "AnchorPoint": [0, 1],
+        "AutomaticSize": "Y",
+        "BackgroundColor3": [0.047058823529411764, 0.06274509803921569, 0.08627450980392157],
+        "BackgroundTransparency": 0.16,
+        "BorderSizePixel": 0,
+        "Position": { "UDim2": [[0, 14], [1, -14]] },
+        "Size": { "UDim2": [[0, 348], [0, 0]] }
+      },
+      "Children": [
+        {
+          "Name": "DockCorner",
+          "ClassName": "UICorner",
+          "Properties": {
+            "CornerRadius": { "UDim": [0, 10] }
+          }
+        },
+        {
+          "Name": "DockStroke",
+          "ClassName": "UIStroke",
+          "Properties": {
+            "Color": [0.3137254901960784, 0.8627450980392157, 1],
+            "Thickness": 1,
+            "Transparency": 0.54
+          }
+        },
+        {
+          "Name": "DockScale",
+          "ClassName": "UIScale",
+          "Properties": {
+            "Scale": 1
+          }
+        },
+        {
+          "Name": "DockPadding",
+          "ClassName": "UIPadding",
+          "Properties": {
+            "PaddingBottom": { "UDim": [0, 12] },
+            "PaddingLeft": { "UDim": [0, 12] },
+            "PaddingRight": { "UDim": [0, 12] },
+            "PaddingTop": { "UDim": [0, 12] }
+          }
+        },
+        {
+          "Name": "DockLayout",
+          "ClassName": "UIListLayout",
+          "Properties": {
+            "Padding": { "UDim": [0, 7] },
+            "SortOrder": "LayoutOrder"
+          }
+        },
+        {
+          "Name": "Title",
+          "ClassName": "TextLabel",
+          "Properties": {
+            "BackgroundTransparency": 1,
+            "Font": "GothamMedium",
+            "LayoutOrder": 1,
+            "Size": { "UDim2": [[1, 0], [0, 18]] },
+            "Text": "ArrayWave",
+            "TextColor3": [0.9215686274509803, 0.9490196078431372, 0.9725490196078431],
+            "TextScaled": true,
+            "TextTruncate": "AtEnd",
+            "TextXAlignment": "Left"
+          },
+          "Children": [
+            {
+              "Name": "TextSize",
+              "ClassName": "UITextSizeConstraint",
+              "Properties": {
+                "MaxTextSize": 17,
+                "MinTextSize": 9
+              }
+            }
+          ]
+        },
+        {
+          "Name": "Status",
+          "ClassName": "TextLabel",
+          "Properties": {
+            "BackgroundTransparency": 1,
+            "Font": "Gotham",
+            "LayoutOrder": 2,
+            "Size": { "UDim2": [[1, 0], [0, 16]] },
+            "Text": "Base song: 9043887091",
+            "TextColor3": [0.4627450980392157, 0.9098039215686274, 1],
+            "TextScaled": true,
+            "TextTruncate": "AtEnd",
+            "TextXAlignment": "Left"
+          },
+          "Children": [
+            {
+              "Name": "TextSize",
+              "ClassName": "UITextSizeConstraint",
+              "Properties": {
+                "MaxTextSize": 13,
+                "MinTextSize": 9
+              }
+            }
+          ]
+        },
+        {
+          "Name": "Source",
+          "ClassName": "TextLabel",
+          "Properties": {
+            "BackgroundTransparency": 1,
+            "Font": "Gotham",
+            "LayoutOrder": 3,
+            "Size": { "UDim2": [[1, 0], [0, 15]] },
+            "Text": "Source: Base Song",
+            "TextColor3": [0.5333333333333333, 0.5882352941176471, 0.6352941176470588],
+            "TextScaled": true,
+            "TextTruncate": "AtEnd",
+            "TextXAlignment": "Left"
+          },
+          "Children": [
+            {
+              "Name": "TextSize",
+              "ClassName": "UITextSizeConstraint",
+              "Properties": {
+                "MaxTextSize": 12,
+                "MinTextSize": 9
+              }
+            }
+          ]
+        },
+        {
+          "Name": "AnalyzerStrip",
+          "ClassName": "Frame",
+          "Properties": {
+            "BackgroundColor3": [0.0196078431372549, 0.027450980392156862, 0.0392156862745098],
+            "BackgroundTransparency": 0.28,
+            "BorderSizePixel": 0,
+            "LayoutOrder": 4,
+            "Size": { "UDim2": [[1, 0], [0, 38]] }
+          },
+          "Children": [
+            {
+              "Name": "AnalyzerCorner",
+              "ClassName": "UICorner",
+              "Properties": {
+                "CornerRadius": { "UDim": [0, 6] }
+              }
+            },
+            {
+              "Name": "AnalyzerPadding",
+              "ClassName": "UIPadding",
+              "Properties": {
+                "PaddingBottom": { "UDim": [0, 6] },
+                "PaddingLeft": { "UDim": [0, 7] },
+                "PaddingRight": { "UDim": [0, 7] },
+                "PaddingTop": { "UDim": [0, 6] }
+              }
+            },
+            {
+              "Name": "AnalyzerLayout",
+              "ClassName": "UIGridLayout",
+              "Properties": {
+                "CellPadding": { "UDim2": [[0, 3], [0, 0]] },
+                "CellSize": { "UDim2": [[0.0625, -3], [1, 0]] },
+                "FillDirection": "Horizontal",
+                "FillDirectionMaxCells": 16,
+                "HorizontalAlignment": "Center",
+                "SortOrder": "LayoutOrder",
+                "VerticalAlignment": "Bottom"
+              }
+            },
+            {
+              "Name": "Band_1",
+              "ClassName": "Frame",
+              "Properties": { "BackgroundTransparency": 1, "LayoutOrder": 1, "Size": { "UDim2": [[1, 0], [1, 0]] } },
+              "Children": [{ "Name": "Fill", "ClassName": "Frame", "Properties": { "AnchorPoint": [0.5, 1], "BackgroundColor3": [0.3137254901960784, 0.8627450980392157, 1], "BackgroundTransparency": 0.28, "BorderSizePixel": 0, "Position": { "UDim2": [[0.5, 0], [1, 0]] }, "Size": { "UDim2": [[1, 0], [0.08, 0]] } }, "Children": [{ "Name": "Corner", "ClassName": "UICorner", "Properties": { "CornerRadius": { "UDim": [0, 3] } } }] }]
+            },
+            {
+              "Name": "Band_2",
+              "ClassName": "Frame",
+              "Properties": { "BackgroundTransparency": 1, "LayoutOrder": 2, "Size": { "UDim2": [[1, 0], [1, 0]] } },
+              "Children": [{ "Name": "Fill", "ClassName": "Frame", "Properties": { "AnchorPoint": [0.5, 1], "BackgroundColor3": [0.3137254901960784, 0.8627450980392157, 1], "BackgroundTransparency": 0.28, "BorderSizePixel": 0, "Position": { "UDim2": [[0.5, 0], [1, 0]] }, "Size": { "UDim2": [[1, 0], [0.08, 0]] } }, "Children": [{ "Name": "Corner", "ClassName": "UICorner", "Properties": { "CornerRadius": { "UDim": [0, 3] } } }] }]
+            },
+            {
+              "Name": "Band_3",
+              "ClassName": "Frame",
+              "Properties": { "BackgroundTransparency": 1, "LayoutOrder": 3, "Size": { "UDim2": [[1, 0], [1, 0]] } },
+              "Children": [{ "Name": "Fill", "ClassName": "Frame", "Properties": { "AnchorPoint": [0.5, 1], "BackgroundColor3": [0.3137254901960784, 0.8627450980392157, 1], "BackgroundTransparency": 0.28, "BorderSizePixel": 0, "Position": { "UDim2": [[0.5, 0], [1, 0]] }, "Size": { "UDim2": [[1, 0], [0.08, 0]] } }, "Children": [{ "Name": "Corner", "ClassName": "UICorner", "Properties": { "CornerRadius": { "UDim": [0, 3] } } }] }]
+            },
+            {
+              "Name": "Band_4",
+              "ClassName": "Frame",
+              "Properties": { "BackgroundTransparency": 1, "LayoutOrder": 4, "Size": { "UDim2": [[1, 0], [1, 0]] } },
+              "Children": [{ "Name": "Fill", "ClassName": "Frame", "Properties": { "AnchorPoint": [0.5, 1], "BackgroundColor3": [0.3137254901960784, 0.8627450980392157, 1], "BackgroundTransparency": 0.28, "BorderSizePixel": 0, "Position": { "UDim2": [[0.5, 0], [1, 0]] }, "Size": { "UDim2": [[1, 0], [0.08, 0]] } }, "Children": [{ "Name": "Corner", "ClassName": "UICorner", "Properties": { "CornerRadius": { "UDim": [0, 3] } } }] }]
+            },
+            {
+              "Name": "Band_5",
+              "ClassName": "Frame",
+              "Properties": { "BackgroundTransparency": 1, "LayoutOrder": 5, "Size": { "UDim2": [[1, 0], [1, 0]] } },
+              "Children": [{ "Name": "Fill", "ClassName": "Frame", "Properties": { "AnchorPoint": [0.5, 1], "BackgroundColor3": [0.3137254901960784, 0.8627450980392157, 1], "BackgroundTransparency": 0.28, "BorderSizePixel": 0, "Position": { "UDim2": [[0.5, 0], [1, 0]] }, "Size": { "UDim2": [[1, 0], [0.08, 0]] } }, "Children": [{ "Name": "Corner", "ClassName": "UICorner", "Properties": { "CornerRadius": { "UDim": [0, 3] } } }] }]
+            },
+            {
+              "Name": "Band_6",
+              "ClassName": "Frame",
+              "Properties": { "BackgroundTransparency": 1, "LayoutOrder": 6, "Size": { "UDim2": [[1, 0], [1, 0]] } },
+              "Children": [{ "Name": "Fill", "ClassName": "Frame", "Properties": { "AnchorPoint": [0.5, 1], "BackgroundColor3": [0.3137254901960784, 0.8627450980392157, 1], "BackgroundTransparency": 0.28, "BorderSizePixel": 0, "Position": { "UDim2": [[0.5, 0], [1, 0]] }, "Size": { "UDim2": [[1, 0], [0.08, 0]] } }, "Children": [{ "Name": "Corner", "ClassName": "UICorner", "Properties": { "CornerRadius": { "UDim": [0, 3] } } }] }]
+            },
+            {
+              "Name": "Band_7",
+              "ClassName": "Frame",
+              "Properties": { "BackgroundTransparency": 1, "LayoutOrder": 7, "Size": { "UDim2": [[1, 0], [1, 0]] } },
+              "Children": [{ "Name": "Fill", "ClassName": "Frame", "Properties": { "AnchorPoint": [0.5, 1], "BackgroundColor3": [0.3137254901960784, 0.8627450980392157, 1], "BackgroundTransparency": 0.28, "BorderSizePixel": 0, "Position": { "UDim2": [[0.5, 0], [1, 0]] }, "Size": { "UDim2": [[1, 0], [0.08, 0]] } }, "Children": [{ "Name": "Corner", "ClassName": "UICorner", "Properties": { "CornerRadius": { "UDim": [0, 3] } } }] }]
+            },
+            {
+              "Name": "Band_8",
+              "ClassName": "Frame",
+              "Properties": { "BackgroundTransparency": 1, "LayoutOrder": 8, "Size": { "UDim2": [[1, 0], [1, 0]] } },
+              "Children": [{ "Name": "Fill", "ClassName": "Frame", "Properties": { "AnchorPoint": [0.5, 1], "BackgroundColor3": [0.3137254901960784, 0.8627450980392157, 1], "BackgroundTransparency": 0.28, "BorderSizePixel": 0, "Position": { "UDim2": [[0.5, 0], [1, 0]] }, "Size": { "UDim2": [[1, 0], [0.08, 0]] } }, "Children": [{ "Name": "Corner", "ClassName": "UICorner", "Properties": { "CornerRadius": { "UDim": [0, 3] } } }] }]
+            },
+            {
+              "Name": "Band_9",
+              "ClassName": "Frame",
+              "Properties": { "BackgroundTransparency": 1, "LayoutOrder": 9, "Size": { "UDim2": [[1, 0], [1, 0]] } },
+              "Children": [{ "Name": "Fill", "ClassName": "Frame", "Properties": { "AnchorPoint": [0.5, 1], "BackgroundColor3": [0.3137254901960784, 0.8627450980392157, 1], "BackgroundTransparency": 0.28, "BorderSizePixel": 0, "Position": { "UDim2": [[0.5, 0], [1, 0]] }, "Size": { "UDim2": [[1, 0], [0.08, 0]] } }, "Children": [{ "Name": "Corner", "ClassName": "UICorner", "Properties": { "CornerRadius": { "UDim": [0, 3] } } }] }]
+            },
+            {
+              "Name": "Band_10",
+              "ClassName": "Frame",
+              "Properties": { "BackgroundTransparency": 1, "LayoutOrder": 10, "Size": { "UDim2": [[1, 0], [1, 0]] } },
+              "Children": [{ "Name": "Fill", "ClassName": "Frame", "Properties": { "AnchorPoint": [0.5, 1], "BackgroundColor3": [0.3137254901960784, 0.8627450980392157, 1], "BackgroundTransparency": 0.28, "BorderSizePixel": 0, "Position": { "UDim2": [[0.5, 0], [1, 0]] }, "Size": { "UDim2": [[1, 0], [0.08, 0]] } }, "Children": [{ "Name": "Corner", "ClassName": "UICorner", "Properties": { "CornerRadius": { "UDim": [0, 3] } } }] }]
+            },
+            {
+              "Name": "Band_11",
+              "ClassName": "Frame",
+              "Properties": { "BackgroundTransparency": 1, "LayoutOrder": 11, "Size": { "UDim2": [[1, 0], [1, 0]] } },
+              "Children": [{ "Name": "Fill", "ClassName": "Frame", "Properties": { "AnchorPoint": [0.5, 1], "BackgroundColor3": [0.3137254901960784, 0.8627450980392157, 1], "BackgroundTransparency": 0.28, "BorderSizePixel": 0, "Position": { "UDim2": [[0.5, 0], [1, 0]] }, "Size": { "UDim2": [[1, 0], [0.08, 0]] } }, "Children": [{ "Name": "Corner", "ClassName": "UICorner", "Properties": { "CornerRadius": { "UDim": [0, 3] } } }] }]
+            },
+            {
+              "Name": "Band_12",
+              "ClassName": "Frame",
+              "Properties": { "BackgroundTransparency": 1, "LayoutOrder": 12, "Size": { "UDim2": [[1, 0], [1, 0]] } },
+              "Children": [{ "Name": "Fill", "ClassName": "Frame", "Properties": { "AnchorPoint": [0.5, 1], "BackgroundColor3": [0.3137254901960784, 0.8627450980392157, 1], "BackgroundTransparency": 0.28, "BorderSizePixel": 0, "Position": { "UDim2": [[0.5, 0], [1, 0]] }, "Size": { "UDim2": [[1, 0], [0.08, 0]] } }, "Children": [{ "Name": "Corner", "ClassName": "UICorner", "Properties": { "CornerRadius": { "UDim": [0, 3] } } }] }]
+            },
+            {
+              "Name": "Band_13",
+              "ClassName": "Frame",
+              "Properties": { "BackgroundTransparency": 1, "LayoutOrder": 13, "Size": { "UDim2": [[1, 0], [1, 0]] } },
+              "Children": [{ "Name": "Fill", "ClassName": "Frame", "Properties": { "AnchorPoint": [0.5, 1], "BackgroundColor3": [0.3137254901960784, 0.8627450980392157, 1], "BackgroundTransparency": 0.28, "BorderSizePixel": 0, "Position": { "UDim2": [[0.5, 0], [1, 0]] }, "Size": { "UDim2": [[1, 0], [0.08, 0]] } }, "Children": [{ "Name": "Corner", "ClassName": "UICorner", "Properties": { "CornerRadius": { "UDim": [0, 3] } } }] }]
+            },
+            {
+              "Name": "Band_14",
+              "ClassName": "Frame",
+              "Properties": { "BackgroundTransparency": 1, "LayoutOrder": 14, "Size": { "UDim2": [[1, 0], [1, 0]] } },
+              "Children": [{ "Name": "Fill", "ClassName": "Frame", "Properties": { "AnchorPoint": [0.5, 1], "BackgroundColor3": [0.3137254901960784, 0.8627450980392157, 1], "BackgroundTransparency": 0.28, "BorderSizePixel": 0, "Position": { "UDim2": [[0.5, 0], [1, 0]] }, "Size": { "UDim2": [[1, 0], [0.08, 0]] } }, "Children": [{ "Name": "Corner", "ClassName": "UICorner", "Properties": { "CornerRadius": { "UDim": [0, 3] } } }] }]
+            },
+            {
+              "Name": "Band_15",
+              "ClassName": "Frame",
+              "Properties": { "BackgroundTransparency": 1, "LayoutOrder": 15, "Size": { "UDim2": [[1, 0], [1, 0]] } },
+              "Children": [{ "Name": "Fill", "ClassName": "Frame", "Properties": { "AnchorPoint": [0.5, 1], "BackgroundColor3": [0.3137254901960784, 0.8627450980392157, 1], "BackgroundTransparency": 0.28, "BorderSizePixel": 0, "Position": { "UDim2": [[0.5, 0], [1, 0]] }, "Size": { "UDim2": [[1, 0], [0.08, 0]] } }, "Children": [{ "Name": "Corner", "ClassName": "UICorner", "Properties": { "CornerRadius": { "UDim": [0, 3] } } }] }]
+            },
+            {
+              "Name": "Band_16",
+              "ClassName": "Frame",
+              "Properties": { "BackgroundTransparency": 1, "LayoutOrder": 16, "Size": { "UDim2": [[1, 0], [1, 0]] } },
+              "Children": [{ "Name": "Fill", "ClassName": "Frame", "Properties": { "AnchorPoint": [0.5, 1], "BackgroundColor3": [0.3137254901960784, 0.8627450980392157, 1], "BackgroundTransparency": 0.28, "BorderSizePixel": 0, "Position": { "UDim2": [[0.5, 0], [1, 0]] }, "Size": { "UDim2": [[1, 0], [0.08, 0]] } }, "Children": [{ "Name": "Corner", "ClassName": "UICorner", "Properties": { "CornerRadius": { "UDim": [0, 3] } } }] }]
+            }
+          ]
+        },
+        {
+          "Name": "BaseRow",
+          "ClassName": "Frame",
+          "Properties": { "BackgroundTransparency": 1, "LayoutOrder": 5, "Size": { "UDim2": [[1, 0], [0, 30]] } },
+          "Children": [
+            { "Name": "BaseRowLayout", "ClassName": "UIGridLayout", "Properties": { "CellPadding": { "UDim2": [[0, 6], [0, 0]] }, "CellSize": { "UDim2": [[0.3333333333333333, -4], [1, 0]] }, "FillDirection": "Horizontal", "FillDirectionMaxCells": 3, "SortOrder": "LayoutOrder" } },
+            { "Name": "PlayBaseButton", "ClassName": "TextButton", "Properties": { "AutoButtonColor": false, "BackgroundColor3": [0.07058823529411765, 0.09411764705882353, 0.12549019607843137], "BackgroundTransparency": 0.16, "BorderSizePixel": 0, "Font": "GothamMedium", "LayoutOrder": 1, "Selectable": true, "Size": { "UDim2": [[1, 0], [0, 30]] }, "Text": "Play Base", "TextColor3": [0.792156862745098, 0.8313725490196079, 0.8666666666666667], "TextScaled": true }, "Children": [{ "Name": "Corner", "ClassName": "UICorner", "Properties": { "CornerRadius": { "UDim": [0, 6] } } }, { "Name": "Stroke", "ClassName": "UIStroke", "Properties": { "Color": [0.22745098039215686, 0.29411764705882354, 0.34509803921568627], "Thickness": 1, "Transparency": 0.66 } }, { "Name": "TextSize", "ClassName": "UITextSizeConstraint", "Properties": { "MaxTextSize": 13, "MinTextSize": 9 } }] },
+            { "Name": "DemoButton", "ClassName": "TextButton", "Properties": { "AutoButtonColor": false, "BackgroundColor3": [0.07058823529411765, 0.09411764705882353, 0.12549019607843137], "BackgroundTransparency": 0.16, "BorderSizePixel": 0, "Font": "GothamMedium", "LayoutOrder": 2, "Selectable": true, "Size": { "UDim2": [[1, 0], [0, 30]] }, "Text": "Demo", "TextColor3": [0.792156862745098, 0.8313725490196079, 0.8666666666666667], "TextScaled": true }, "Children": [{ "Name": "Corner", "ClassName": "UICorner", "Properties": { "CornerRadius": { "UDim": [0, 6] } } }, { "Name": "Stroke", "ClassName": "UIStroke", "Properties": { "Color": [0.22745098039215686, 0.29411764705882354, 0.34509803921568627], "Thickness": 1, "Transparency": 0.66 } }, { "Name": "TextSize", "ClassName": "UITextSizeConstraint", "Properties": { "MaxTextSize": 13, "MinTextSize": 9 } }] },
+            { "Name": "MicButton", "ClassName": "TextButton", "Properties": { "AutoButtonColor": false, "BackgroundColor3": [0.07058823529411765, 0.09411764705882353, 0.12549019607843137], "BackgroundTransparency": 0.16, "BorderSizePixel": 0, "Font": "GothamMedium", "LayoutOrder": 3, "Selectable": true, "Size": { "UDim2": [[1, 0], [0, 30]] }, "Text": "Mic", "TextColor3": [0.792156862745098, 0.8313725490196079, 0.8666666666666667], "TextScaled": true }, "Children": [{ "Name": "Corner", "ClassName": "UICorner", "Properties": { "CornerRadius": { "UDim": [0, 6] } } }, { "Name": "Stroke", "ClassName": "UIStroke", "Properties": { "Color": [0.22745098039215686, 0.29411764705882354, 0.34509803921568627], "Thickness": 1, "Transparency": 0.66 } }, { "Name": "TextSize", "ClassName": "UITextSizeConstraint", "Properties": { "MaxTextSize": 13, "MinTextSize": 9 } }] }
+          ]
+        },
+        {
+          "Name": "AssetIdBox",
+          "ClassName": "TextBox",
+          "Properties": {
+            "BackgroundColor3": [0.0196078431372549, 0.027450980392156862, 0.0392156862745098],
+            "BackgroundTransparency": 0.1,
+            "BorderSizePixel": 0,
+            "ClearTextOnFocus": false,
+            "Font": "Gotham",
+            "LayoutOrder": 6,
+            "PlaceholderText": "audio asset id",
+            "Selectable": true,
+            "Size": { "UDim2": [[1, 0], [0, 30]] },
+            "Text": "9043887091",
+            "TextColor3": [0.9215686274509803, 0.9490196078431372, 0.9725490196078431],
+            "TextScaled": true,
+            "TextXAlignment": "Left"
+          },
+          "Children": [
+            { "Name": "TextSize", "ClassName": "UITextSizeConstraint", "Properties": { "MaxTextSize": 14, "MinTextSize": 10 } },
+            { "Name": "Corner", "ClassName": "UICorner", "Properties": { "CornerRadius": { "UDim": [0, 6] } } },
+            { "Name": "Stroke", "ClassName": "UIStroke", "Properties": { "Color": [0.22745098039215686, 0.29411764705882354, 0.34509803921568627], "Thickness": 1, "Transparency": 0.58 } },
+            { "Name": "Padding", "ClassName": "UIPadding", "Properties": { "PaddingLeft": { "UDim": [0, 8] }, "PaddingRight": { "UDim": [0, 8] } } }
+          ]
+        },
+        {
+          "Name": "AssetRow",
+          "ClassName": "Frame",
+          "Properties": { "BackgroundTransparency": 1, "LayoutOrder": 7, "Size": { "UDim2": [[1, 0], [0, 30]] } },
+          "Children": [
+            { "Name": "AssetRowLayout", "ClassName": "UIGridLayout", "Properties": { "CellPadding": { "UDim2": [[0, 6], [0, 0]] }, "CellSize": { "UDim2": [[0.5, -3], [1, 0]] }, "FillDirection": "Horizontal", "FillDirectionMaxCells": 2, "SortOrder": "LayoutOrder" } },
+            { "Name": "PlayAssetButton", "ClassName": "TextButton", "Properties": { "AutoButtonColor": false, "BackgroundColor3": [0.07058823529411765, 0.09411764705882353, 0.12549019607843137], "BackgroundTransparency": 0.16, "BorderSizePixel": 0, "Font": "GothamMedium", "LayoutOrder": 1, "Selectable": true, "Size": { "UDim2": [[1, 0], [0, 30]] }, "Text": "Play Asset", "TextColor3": [0.792156862745098, 0.8313725490196079, 0.8666666666666667], "TextScaled": true }, "Children": [{ "Name": "Corner", "ClassName": "UICorner", "Properties": { "CornerRadius": { "UDim": [0, 6] } } }, { "Name": "Stroke", "ClassName": "UIStroke", "Properties": { "Color": [0.22745098039215686, 0.29411764705882354, 0.34509803921568627], "Thickness": 1, "Transparency": 0.66 } }, { "Name": "TextSize", "ClassName": "UITextSizeConstraint", "Properties": { "MaxTextSize": 13, "MinTextSize": 9 } }] },
+            { "Name": "StopButton", "ClassName": "TextButton", "Properties": { "AutoButtonColor": false, "BackgroundColor3": [0.07058823529411765, 0.09411764705882353, 0.12549019607843137], "BackgroundTransparency": 0.16, "BorderSizePixel": 0, "Font": "GothamMedium", "LayoutOrder": 2, "Selectable": true, "Size": { "UDim2": [[1, 0], [0, 30]] }, "Text": "Stop", "TextColor3": [0.792156862745098, 0.8313725490196079, 0.8666666666666667], "TextScaled": true }, "Children": [{ "Name": "Corner", "ClassName": "UICorner", "Properties": { "CornerRadius": { "UDim": [0, 6] } } }, { "Name": "Stroke", "ClassName": "UIStroke", "Properties": { "Color": [0.22745098039215686, 0.29411764705882354, 0.34509803921568627], "Thickness": 1, "Transparency": 0.66 } }, { "Name": "TextSize", "ClassName": "UITextSizeConstraint", "Properties": { "MaxTextSize": 13, "MinTextSize": 9 } }] }
+          ]
+        },
+        { "Name": "VisualDivider", "ClassName": "Frame", "Properties": { "BackgroundColor3": [0.22745098039215686, 0.29411764705882354, 0.34509803921568627], "BackgroundTransparency": 0.72, "BorderSizePixel": 0, "LayoutOrder": 8, "Size": { "UDim2": [[1, 0], [0, 1]] } } },
+        {
+          "Name": "VisualizerRowA",
+          "ClassName": "Frame",
+          "Properties": { "BackgroundTransparency": 1, "LayoutOrder": 9, "Size": { "UDim2": [[1, 0], [0, 30]] } },
+          "Children": [
+            { "Name": "VisualRowALayout", "ClassName": "UIGridLayout", "Properties": { "CellPadding": { "UDim2": [[0, 6], [0, 0]] }, "CellSize": { "UDim2": [[0.3333333333333333, -4], [1, 0]] }, "FillDirection": "Horizontal", "FillDirectionMaxCells": 3, "SortOrder": "LayoutOrder" } },
+            { "Name": "GridButton", "ClassName": "TextButton", "Properties": { "AutoButtonColor": false, "BackgroundColor3": [0.07058823529411765, 0.09411764705882353, 0.12549019607843137], "BackgroundTransparency": 0.16, "BorderSizePixel": 0, "Font": "GothamMedium", "LayoutOrder": 1, "Selectable": true, "Size": { "UDim2": [[1, 0], [0, 30]] }, "Text": "Grid", "TextColor3": [0.792156862745098, 0.8313725490196079, 0.8666666666666667], "TextScaled": true }, "Children": [{ "Name": "Corner", "ClassName": "UICorner", "Properties": { "CornerRadius": { "UDim": [0, 6] } } }, { "Name": "Stroke", "ClassName": "UIStroke", "Properties": { "Color": [0.22745098039215686, 0.29411764705882354, 0.34509803921568627], "Thickness": 1, "Transparency": 0.66 } }, { "Name": "TextSize", "ClassName": "UITextSizeConstraint", "Properties": { "MaxTextSize": 13, "MinTextSize": 9 } }] },
+            { "Name": "RowButton", "ClassName": "TextButton", "Properties": { "AutoButtonColor": false, "BackgroundColor3": [0.07058823529411765, 0.09411764705882353, 0.12549019607843137], "BackgroundTransparency": 0.16, "BorderSizePixel": 0, "Font": "GothamMedium", "LayoutOrder": 2, "Selectable": true, "Size": { "UDim2": [[1, 0], [0, 30]] }, "Text": "Row", "TextColor3": [0.792156862745098, 0.8313725490196079, 0.8666666666666667], "TextScaled": true }, "Children": [{ "Name": "Corner", "ClassName": "UICorner", "Properties": { "CornerRadius": { "UDim": [0, 6] } } }, { "Name": "Stroke", "ClassName": "UIStroke", "Properties": { "Color": [0.22745098039215686, 0.29411764705882354, 0.34509803921568627], "Thickness": 1, "Transparency": 0.66 } }, { "Name": "TextSize", "ClassName": "UITextSizeConstraint", "Properties": { "MaxTextSize": 13, "MinTextSize": 9 } }] },
+            { "Name": "CircleButton", "ClassName": "TextButton", "Properties": { "AutoButtonColor": false, "BackgroundColor3": [0.07058823529411765, 0.09411764705882353, 0.12549019607843137], "BackgroundTransparency": 0.16, "BorderSizePixel": 0, "Font": "GothamMedium", "LayoutOrder": 3, "Selectable": true, "Size": { "UDim2": [[1, 0], [0, 30]] }, "Text": "Circle", "TextColor3": [0.792156862745098, 0.8313725490196079, 0.8666666666666667], "TextScaled": true }, "Children": [{ "Name": "Corner", "ClassName": "UICorner", "Properties": { "CornerRadius": { "UDim": [0, 6] } } }, { "Name": "Stroke", "ClassName": "UIStroke", "Properties": { "Color": [0.22745098039215686, 0.29411764705882354, 0.34509803921568627], "Thickness": 1, "Transparency": 0.66 } }, { "Name": "TextSize", "ClassName": "UITextSizeConstraint", "Properties": { "MaxTextSize": 13, "MinTextSize": 9 } }] }
+          ]
+        },
+        {
+          "Name": "VisualizerRowB",
+          "ClassName": "Frame",
+          "Properties": { "BackgroundTransparency": 1, "LayoutOrder": 10, "Size": { "UDim2": [[1, 0], [0, 30]] } },
+          "Children": [
+            { "Name": "VisualRowBLayout", "ClassName": "UIGridLayout", "Properties": { "CellPadding": { "UDim2": [[0, 6], [0, 0]] }, "CellSize": { "UDim2": [[0.5, -3], [1, 0]] }, "FillDirection": "Horizontal", "FillDirectionMaxCells": 2, "SortOrder": "LayoutOrder" } },
+            { "Name": "AllButton", "ClassName": "TextButton", "Properties": { "AutoButtonColor": false, "BackgroundColor3": [0.07058823529411765, 0.09411764705882353, 0.12549019607843137], "BackgroundTransparency": 0.16, "BorderSizePixel": 0, "Font": "GothamMedium", "LayoutOrder": 1, "Selectable": true, "Size": { "UDim2": [[1, 0], [0, 30]] }, "Text": "All", "TextColor3": [0.792156862745098, 0.8313725490196079, 0.8666666666666667], "TextScaled": true }, "Children": [{ "Name": "Corner", "ClassName": "UICorner", "Properties": { "CornerRadius": { "UDim": [0, 6] } } }, { "Name": "Stroke", "ClassName": "UIStroke", "Properties": { "Color": [0.22745098039215686, 0.29411764705882354, 0.34509803921568627], "Thickness": 1, "Transparency": 0.66 } }, { "Name": "TextSize", "ClassName": "UITextSizeConstraint", "Properties": { "MaxTextSize": 13, "MinTextSize": 9 } }] },
+            { "Name": "MinimalButton", "ClassName": "TextButton", "Properties": { "AutoButtonColor": false, "BackgroundColor3": [0.07058823529411765, 0.09411764705882353, 0.12549019607843137], "BackgroundTransparency": 0.16, "BorderSizePixel": 0, "Font": "GothamMedium", "LayoutOrder": 2, "Selectable": true, "Size": { "UDim2": [[1, 0], [0, 30]] }, "Text": "Minimal", "TextColor3": [0.792156862745098, 0.8313725490196079, 0.8666666666666667], "TextScaled": true }, "Children": [{ "Name": "Corner", "ClassName": "UICorner", "Properties": { "CornerRadius": { "UDim": [0, 6] } } }, { "Name": "Stroke", "ClassName": "UIStroke", "Properties": { "Color": [0.22745098039215686, 0.29411764705882354, 0.34509803921568627], "Thickness": 1, "Transparency": 0.66 } }, { "Name": "TextSize", "ClassName": "UITextSizeConstraint", "Properties": { "MaxTextSize": 13, "MinTextSize": 9 } }] }
+          ]
+        },
+        {
+          "Name": "TuneRowA",
+          "ClassName": "Frame",
+          "Properties": { "BackgroundTransparency": 1, "LayoutOrder": 11, "Size": { "UDim2": [[1, 0], [0, 30]] } },
+          "Children": [
+            { "Name": "TuneRowALayout", "ClassName": "UIGridLayout", "Properties": { "CellPadding": { "UDim2": [[0, 6], [0, 0]] }, "CellSize": { "UDim2": [[0.5, -3], [1, 0]] }, "FillDirection": "Horizontal", "FillDirectionMaxCells": 2, "SortOrder": "LayoutOrder" } },
+            { "Name": "SensMinusButton", "ClassName": "TextButton", "Properties": { "AutoButtonColor": false, "BackgroundColor3": [0.07058823529411765, 0.09411764705882353, 0.12549019607843137], "BackgroundTransparency": 0.16, "BorderSizePixel": 0, "Font": "GothamMedium", "LayoutOrder": 1, "Selectable": true, "Size": { "UDim2": [[1, 0], [0, 30]] }, "Text": "Sens -", "TextColor3": [0.792156862745098, 0.8313725490196079, 0.8666666666666667], "TextScaled": true }, "Children": [{ "Name": "Corner", "ClassName": "UICorner", "Properties": { "CornerRadius": { "UDim": [0, 6] } } }, { "Name": "Stroke", "ClassName": "UIStroke", "Properties": { "Color": [0.22745098039215686, 0.29411764705882354, 0.34509803921568627], "Thickness": 1, "Transparency": 0.66 } }, { "Name": "TextSize", "ClassName": "UITextSizeConstraint", "Properties": { "MaxTextSize": 13, "MinTextSize": 9 } }] },
+            { "Name": "SensPlusButton", "ClassName": "TextButton", "Properties": { "AutoButtonColor": false, "BackgroundColor3": [0.07058823529411765, 0.09411764705882353, 0.12549019607843137], "BackgroundTransparency": 0.16, "BorderSizePixel": 0, "Font": "GothamMedium", "LayoutOrder": 2, "Selectable": true, "Size": { "UDim2": [[1, 0], [0, 30]] }, "Text": "Sens +", "TextColor3": [0.792156862745098, 0.8313725490196079, 0.8666666666666667], "TextScaled": true }, "Children": [{ "Name": "Corner", "ClassName": "UICorner", "Properties": { "CornerRadius": { "UDim": [0, 6] } } }, { "Name": "Stroke", "ClassName": "UIStroke", "Properties": { "Color": [0.22745098039215686, 0.29411764705882354, 0.34509803921568627], "Thickness": 1, "Transparency": 0.66 } }, { "Name": "TextSize", "ClassName": "UITextSizeConstraint", "Properties": { "MaxTextSize": 13, "MinTextSize": 9 } }] }
+          ]
+        },
+        {
+          "Name": "TuneRowB",
+          "ClassName": "Frame",
+          "Properties": { "BackgroundTransparency": 1, "LayoutOrder": 12, "Size": { "UDim2": [[1, 0], [0, 30]] } },
+          "Children": [
+            { "Name": "TuneRowBLayout", "ClassName": "UIGridLayout", "Properties": { "CellPadding": { "UDim2": [[0, 6], [0, 0]] }, "CellSize": { "UDim2": [[0.5, -3], [1, 0]] }, "FillDirection": "Horizontal", "FillDirectionMaxCells": 2, "SortOrder": "LayoutOrder" } },
+            { "Name": "IntMinusButton", "ClassName": "TextButton", "Properties": { "AutoButtonColor": false, "BackgroundColor3": [0.07058823529411765, 0.09411764705882353, 0.12549019607843137], "BackgroundTransparency": 0.16, "BorderSizePixel": 0, "Font": "GothamMedium", "LayoutOrder": 1, "Selectable": true, "Size": { "UDim2": [[1, 0], [0, 30]] }, "Text": "Int -", "TextColor3": [0.792156862745098, 0.8313725490196079, 0.8666666666666667], "TextScaled": true }, "Children": [{ "Name": "Corner", "ClassName": "UICorner", "Properties": { "CornerRadius": { "UDim": [0, 6] } } }, { "Name": "Stroke", "ClassName": "UIStroke", "Properties": { "Color": [0.22745098039215686, 0.29411764705882354, 0.34509803921568627], "Thickness": 1, "Transparency": 0.66 } }, { "Name": "TextSize", "ClassName": "UITextSizeConstraint", "Properties": { "MaxTextSize": 13, "MinTextSize": 9 } }] },
+            { "Name": "IntPlusButton", "ClassName": "TextButton", "Properties": { "AutoButtonColor": false, "BackgroundColor3": [0.07058823529411765, 0.09411764705882353, 0.12549019607843137], "BackgroundTransparency": 0.16, "BorderSizePixel": 0, "Font": "GothamMedium", "LayoutOrder": 2, "Selectable": true, "Size": { "UDim2": [[1, 0], [0, 30]] }, "Text": "Int +", "TextColor3": [0.792156862745098, 0.8313725490196079, 0.8666666666666667], "TextScaled": true }, "Children": [{ "Name": "Corner", "ClassName": "UICorner", "Properties": { "CornerRadius": { "UDim": [0, 6] } } }, { "Name": "Stroke", "ClassName": "UIStroke", "Properties": { "Color": [0.22745098039215686, 0.29411764705882354, 0.34509803921568627], "Thickness": 1, "Transparency": 0.66 } }, { "Name": "TextSize", "ClassName": "UITextSizeConstraint", "Properties": { "MaxTextSize": 13, "MinTextSize": 9 } }] }
+          ]
+        },
+        {
+          "Name": "ActionRow",
+          "ClassName": "Frame",
+          "Properties": { "BackgroundTransparency": 1, "LayoutOrder": 13, "Size": { "UDim2": [[1, 0], [0, 30]] } },
+          "Children": [
+            { "Name": "ActionRowLayout", "ClassName": "UIGridLayout", "Properties": { "CellPadding": { "UDim2": [[0, 6], [0, 0]] }, "CellSize": { "UDim2": [[0.3333333333333333, -4], [1, 0]] }, "FillDirection": "Horizontal", "FillDirectionMaxCells": 3, "SortOrder": "LayoutOrder" } },
+            { "Name": "PulseTestButton", "ClassName": "TextButton", "Properties": { "AutoButtonColor": false, "BackgroundColor3": [0.07058823529411765, 0.09411764705882353, 0.12549019607843137], "BackgroundTransparency": 0.16, "BorderSizePixel": 0, "Font": "GothamMedium", "LayoutOrder": 1, "Selectable": true, "Size": { "UDim2": [[1, 0], [0, 30]] }, "Text": "Pulse Test", "TextColor3": [0.792156862745098, 0.8313725490196079, 0.8666666666666667], "TextScaled": true }, "Children": [{ "Name": "Corner", "ClassName": "UICorner", "Properties": { "CornerRadius": { "UDim": [0, 6] } } }, { "Name": "Stroke", "ClassName": "UIStroke", "Properties": { "Color": [0.22745098039215686, 0.29411764705882354, 0.34509803921568627], "Thickness": 1, "Transparency": 0.66 } }, { "Name": "TextSize", "ClassName": "UITextSizeConstraint", "Properties": { "MaxTextSize": 13, "MinTextSize": 9 } }] },
+            { "Name": "ResetViewButton", "ClassName": "TextButton", "Properties": { "AutoButtonColor": false, "BackgroundColor3": [0.07058823529411765, 0.09411764705882353, 0.12549019607843137], "BackgroundTransparency": 0.16, "BorderSizePixel": 0, "Font": "GothamMedium", "LayoutOrder": 2, "Selectable": true, "Size": { "UDim2": [[1, 0], [0, 30]] }, "Text": "Reset View", "TextColor3": [0.792156862745098, 0.8313725490196079, 0.8666666666666667], "TextScaled": true }, "Children": [{ "Name": "Corner", "ClassName": "UICorner", "Properties": { "CornerRadius": { "UDim": [0, 6] } } }, { "Name": "Stroke", "ClassName": "UIStroke", "Properties": { "Color": [0.22745098039215686, 0.29411764705882354, 0.34509803921568627], "Thickness": 1, "Transparency": 0.66 } }, { "Name": "TextSize", "ClassName": "UITextSizeConstraint", "Properties": { "MaxTextSize": 13, "MinTextSize": 9 } }] },
+            { "Name": "DropMarbleButton", "ClassName": "TextButton", "Properties": { "AutoButtonColor": false, "BackgroundColor3": [0.07058823529411765, 0.09411764705882353, 0.12549019607843137], "BackgroundTransparency": 0.16, "BorderSizePixel": 0, "Font": "GothamMedium", "LayoutOrder": 3, "Selectable": true, "Size": { "UDim2": [[1, 0], [0, 30]] }, "Text": "Drop Marble", "TextColor3": [0.792156862745098, 0.8313725490196079, 0.8666666666666667], "TextScaled": true }, "Children": [{ "Name": "Corner", "ClassName": "UICorner", "Properties": { "CornerRadius": { "UDim": [0, 6] } } }, { "Name": "Stroke", "ClassName": "UIStroke", "Properties": { "Color": [0.22745098039215686, 0.29411764705882354, 0.34509803921568627], "Thickness": 1, "Transparency": 0.66 } }, { "Name": "TextSize", "ClassName": "UITextSizeConstraint", "Properties": { "MaxTextSize": 13, "MinTextSize": 9 } }] }
+          ]
+        },
+        {
+          "Name": "Tuning",
+          "ClassName": "TextLabel",
+          "Properties": {
+            "BackgroundTransparency": 1,
+            "Font": "Gotham",
+            "LayoutOrder": 14,
+            "Size": { "UDim2": [[1, 0], [0, 15]] },
+            "Text": "Grid  Sens 1.00  Int 1.00  Beat 0.00",
+            "TextColor3": [0.5333333333333333, 0.5882352941176471, 0.6352941176470588],
+            "TextScaled": true,
+            "TextTruncate": "AtEnd",
+            "TextXAlignment": "Left"
+          },
+          "Children": [
+            {
+              "Name": "TextSize",
+              "ClassName": "UITextSizeConstraint",
+              "Properties": {
+                "MaxTextSize": 12,
+                "MinTextSize": 9
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

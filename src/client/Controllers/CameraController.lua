@@ -26,7 +26,7 @@ local framingUntil = 0
 local hasReleasedFrame = true
 
 local function getFramedCFrame(): CFrame
-	return CFrame.lookAt(Vector3.new(0, 24, -44), Vector3.new(0, 4, 0))
+	return CFrame.lookAt(Vector3.new(0, 27, -52), Vector3.new(0, 4.8, 2.2))
 end
 
 local function getCamera(): Camera?
@@ -47,7 +47,7 @@ local function frameSculpture()
 
 	camera.CameraType = Enum.CameraType.Scriptable
 	camera.CFrame = getFramedCFrame()
-	camera.FieldOfView = 72
+	camera.FieldOfView = 73
 	baseFov = camera.FieldOfView
 	framingUntil = os.clock() + 6
 	hasReleasedFrame = false
@@ -93,7 +93,9 @@ function CameraController:Update(deltaTime: number, frame: AudioFrame, style: Vi
 	end
 
 	if frame.beat and frame.time - lastBeatTime > 0.16 then
-		pulse = math.max(pulse, math.clamp(math.max(frame.peak, frame.bass), 0, 1))
+		local bassAccent = frame.bass * 0.72
+		local beatAccent = math.max(frame.beatStrength, bassAccent)
+		pulse = math.max(pulse, math.clamp(beatAccent, 0, 1))
 		lastBeatTime = frame.time
 	end
 
@@ -101,14 +103,8 @@ function CameraController:Update(deltaTime: number, frame: AudioFrame, style: Vi
 		baseFov = NumberUtil.expSmooth(baseFov, camera.FieldOfView, deltaTime, 1)
 	end
 
-	local targetFov = baseFov + pulse * 2.2
+	local targetFov = baseFov + pulse * 1.55
 	camera.FieldOfView = NumberUtil.expSmooth(camera.FieldOfView, targetFov, deltaTime, 6)
-
-	if style == "All" and pulse > 0.08 then
-		local shake = math.clamp(pulse * 0.035, 0, 0.045)
-		local timeNow = os.clock()
-		camera.CFrame = camera.CFrame * CFrame.new(math.sin(timeNow * 37) * shake, math.cos(timeNow * 31) * shake, 0)
-	end
 
 	pulse = NumberUtil.expSmooth(pulse, 0, deltaTime, 5)
 end

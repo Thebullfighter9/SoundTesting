@@ -1,44 +1,72 @@
 # Audio
 
-ArrayWave keeps all audio analysis local to the client. Audio frames are presentation data, not server authority.
+ArrayWave keeps audio analysis local to the client. Audio frames are presentation data and do not cross the network.
 
 ## Base Song
 
-The default base song is Roblox audio asset `9043887091`. `AudioController` attempts this asset automatically on startup and the UI asset field is prefilled with the same ID.
+The default base song is Roblox audio asset `9043887091`. `AudioController` attempts this asset automatically on startup, and the UI asset field is prefilled with the same ID.
 
-The controller first attempts modular audio. If the asset is private, blocked for the experience, unavailable, or the audio graph fails, it reports `Base song unavailable - using demo signal` and starts Demo mode without errors.
+If the asset is private, blocked for the experience, unavailable, or the audio graph fails, the controller reports `Base song unavailable - using demo signal` and starts Demo mode without errors.
 
-## Demo Mode
+## Audio Frame
 
-Demo mode starts immediately whenever fallback is needed. It synthesizes a signal with layered sine waves, a kick-like pulse, slow bass motion, and `math.noise` variation. The controller produces 32 changing bands, RMS, peak, bass, beat, and frame time.
+Each frame exposes:
 
-`ResonanceController` also has a fallback band synthesizer. If the audio frame is unavailable or all bands are flat, Grid, Row, and Circle modes still receive useful band values from RMS, peak, bass, and time.
+- `rms`
+- `peak`
+- `bass`
+- `lowMid`
+- `mid`
+- `high`
+- `air`
+- `beat`
+- `beatStrength`
+- `transient`
+- `spectralFlux`
+- `centroid`
+- `bands`
+- `time`
 
-## Asset Mode
+The controller clamps values to `0..1` and uses `NumberUtil.sanitizeFiniteNumber` to reject NaN and infinite values.
 
-Asset mode trims the text box input and accepts numeric asset IDs only. Empty, nonnumeric, negative, or excessively long input is rejected.
+## Modular Audio Path
 
-The client first attempts a modular audio graph:
+Asset mode first attempts a modular audio graph:
 
 - `AudioPlayer`
 - `AudioAnalyzer`
 - `Wire`
-- `AudioDeviceOutput` when supported
+- `AudioDeviceOutput`
 
-Analyzer reads prefer `RmsLevel`, `PeakLevel`, and `GetSpectrum()` when available. If spectrum access fails, bands are synthesized from RMS and peak.
-
-If the modular graph cannot be created, the client tries a local `Sound` using `SoundId = "rbxassetid://<id>"` and reads `PlaybackLoudness`. Invalid or private assets return to Demo mode with a clear status.
-
-## Mic Mode
-
-Mic mode attempts supported modular audio only:
+Mic mode attempts:
 
 - `AudioDeviceInput`
 - `AudioAnalyzer`
 - `Wire`
 
-The implementation does not claim access to raw microphone samples. If microphone APIs, permission, or eligibility are unavailable, the controller reports `Mic unavailable - using demo signal` and returns to Demo mode.
+Graph construction, property assignment, wiring, playback, and analyzer reads are wrapped with `pcall`. Analyzer reads prefer `RmsLevel`, `PeakLevel`, and `GetSpectrum()` when supported.
+
+## Fallbacks
+
+If spectrum data is unavailable, the controller synthesizes detailed bands from RMS, peak, and time so the visualizer still has a musical shape.
+
+If the modular asset path cannot play or analyze, the client tries a local `Sound` with `SoundId = "rbxassetid://9043887091"` for the base song or the requested asset ID, then reads `PlaybackLoudness`.
+
+If the classic `Sound` path also fails, or if microphone support is unavailable, Demo mode starts. Demo mode creates kick-like bass pulses, snare-like mid hits, high-hat shimmer, slow groove variation, and 96 non-flat bands.
+
+## Beat Detection
+
+The analysis pipeline maintains:
+
+- attack/release-smoothed bands
+- short and long energy envelopes
+- positive spectral flux
+- transient energy from envelope difference
+- normalized spectral centroid
+- dynamic threshold and cooldown for beat detection
+
+Bass bands use heavier smoothing, while high and air bands respond faster.
 
 ## Privacy
 
-Raw microphone data, raw audio samples, spectrum arrays, RMS, peak, bass, and beat values are never saved and never sent to the server.
+Raw audio samples, raw microphone data, spectrum arrays, RMS, peak, band values, loudness, and beat values are never saved and never sent to the server.
