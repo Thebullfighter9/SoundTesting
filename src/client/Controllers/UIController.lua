@@ -426,9 +426,10 @@ local function bindStaticUi()
 	songHighlightUntil = os.clock() + 3.25
 
 	local compactPlayBase = findButton(collapsed, "CompactPlayBaseButton")
-	compactDemoButton = findOptionalButton(collapsed, "CompactDemoButton") or findOptionalButton(collapsed, "CompactCameraButton")
-	assert(compactDemoButton ~= nil, "ArrayWaveGui missing CompactDemoButton")
-	(compactDemoButton :: TextButton).Text = "Demo"
+	local resolvedDemoButton = findOptionalButton(collapsed, "CompactDemoButton") or findOptionalButton(collapsed, "CompactCameraButton")
+	assert(resolvedDemoButton ~= nil, "ArrayWaveGui missing CompactDemoButton")
+	compactDemoButton = resolvedDemoButton
+	resolvedDemoButton.Text = "Demo"
 	currentModeButton = findButton(collapsed, "CurrentModeButton")
 	tuneButton = findButton(collapsed, "TuneButton")
 
