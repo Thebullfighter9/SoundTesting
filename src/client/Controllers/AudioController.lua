@@ -31,6 +31,9 @@ local demoTime = 0
 local shortEnvelope = 0.08
 local longEnvelope = 0.08
 local beatThreshold = 0.22
+local rollingPeak = 0.18
+local rollingRms = 0.12
+local autoGain = 1
 local lastBeatTime = 0
 local audioAttemptSerial = 0
 local assetAnalyzer: AudioAnalyzer? = nil
@@ -53,6 +56,7 @@ local currentFrame: AudioFrame = {
 	transient = 0,
 	spectralFlux = 0,
 	centroid = 0,
+	visualEnergy = 0,
 	bands = smoothedBands,
 	time = 0,
 }
@@ -217,7 +221,7 @@ local function resampleSpectrum(spectrum: { any }, rms: number, peak: number, ti
 			samples += 1
 		end
 
-		bands[bandIndex] = clamp01((if samples > 0 then total / samples else 0) * sensitivity)
+		bands[bandIndex] = clamp01(if samples > 0 then total / samples else 0)
 	end
 
 	return bands
@@ -242,13 +246,34 @@ local function applyAnalysis(rawBands: { number }, rawRms: number, rawPeak: numb
 	local cleanDelta = math.clamp(NumberUtil.sanitizeFiniteNumber(deltaTime, 1 / 60), 1 / 240, 0.2)
 	local sanitizedRms = clamp01(rawRms)
 	local sanitizedPeak = clamp01(math.max(rawPeak, sanitizedRms))
+	local rawBandEnergy = 0
 	local fluxTotal = 0
 	local centroidNumerator = 0
 	local energyTotal = 0
 
 	for index = 1, bandCount do
+		rawBandEnergy += clamp01(rawBands[index] or 0)
+	end
+	rawBandEnergy /= math.max(1, bandCount)
+
+	local inputPeak = math.max(sanitizedPeak, sanitizedRms, rawBandEnergy, Constants.MIN_VISIBLE_ENERGY)
+	local peakSpeed = if inputPeak > rollingPeak then 16 else 0.85
+	local rmsSpeed = if sanitizedRms > rollingRms then 10 else 0.65
+	rollingPeak = NumberUtil.expSmooth(rollingPeak, inputPeak, cleanDelta, peakSpeed)
+	rollingRms = NumberUtil.expSmooth(rollingRms, math.max(sanitizedRms, rawBandEnergy), cleanDelta, rmsSpeed)
+
+	local gainBase = math.max(rollingPeak * 0.78 + rollingRms * 0.22, Constants.MIN_VISIBLE_ENERGY)
+	local targetGain = math.clamp(0.68 / gainBase, 1, Constants.MAX_VISUAL_GAIN)
+	autoGain = NumberUtil.expSmooth(autoGain, targetGain, cleanDelta, if targetGain > autoGain then 3.5 else 0.9)
+
+	local function normalizeForVisual(value: number): number
+		local gained = math.clamp(value * sensitivity * autoGain, 0, 8)
+		return clamp01(1 - math.exp(-gained * 2.4))
+	end
+
+	for index = 1, bandCount do
 		local alpha = (index - 1) / math.max(1, bandCount - 1)
-		local target = clamp01((rawBands[index] or 0) * sensitivity)
+		local target = normalizeForVisual(clamp01(rawBands[index] or 0))
 		local current = smoothedBands[index] or 0
 		local attack = 20 - alpha * 8
 		local release = 3.8 + alpha * 5.5
@@ -273,22 +298,25 @@ local function applyAnalysis(rawBands: { number }, rawRms: number, rawPeak: numb
 	local high = averageRange(smoothedBands, 0.62, 0.84)
 	local air = averageRange(smoothedBands, 0.84, 1)
 	local bandEnergy = math.clamp(energyTotal / math.max(1, bandCount), 0, 1)
-	local rms = clamp01(math.max(sanitizedRms, bandEnergy * 0.82, bass * 0.42))
-	local peak = clamp01(math.max(sanitizedPeak, rms, bass * 0.9, high * 0.72))
+	local normalizedRms = normalizeForVisual(sanitizedRms)
+	local normalizedPeak = normalizeForVisual(sanitizedPeak)
+	local rms = clamp01(math.max(normalizedRms, bandEnergy * 0.82, bass * 0.42, Constants.MIN_VISIBLE_ENERGY * 0.65))
+	local peak = clamp01(math.max(normalizedPeak, rms, bass * 0.95, high * 0.76))
 	local centroid = if energyTotal > 0.0001 then math.clamp(centroidNumerator / energyTotal, 0, 1) else 0
 	local spectralFlux = math.clamp(fluxTotal / math.max(1, bandCount) * 8, 0, 1)
+	local visualEnergy = clamp01(math.max(rms, peak * 0.88, bandEnergy, bass * 0.9))
 
-	shortEnvelope = NumberUtil.expSmooth(shortEnvelope, math.max(peak, bass * 0.9, spectralFlux), cleanDelta, 18)
-	longEnvelope = NumberUtil.expSmooth(longEnvelope, math.max(rms, bandEnergy), cleanDelta, 1.55)
-	local transient = math.clamp((shortEnvelope - longEnvelope) * 2.8, 0, 1)
-	beatThreshold = NumberUtil.expSmooth(beatThreshold, math.clamp(longEnvelope + 0.16 + spectralFlux * 0.14, 0.16, 0.62), cleanDelta, 1.8)
+	shortEnvelope = NumberUtil.expSmooth(shortEnvelope, math.max(peak, bass, spectralFlux * 0.9), cleanDelta, 20)
+	longEnvelope = NumberUtil.expSmooth(longEnvelope, math.max(rms, bandEnergy), cleanDelta, 1.3)
+	local transient = math.clamp((shortEnvelope - longEnvelope) * 3.4, 0, 1)
+	beatThreshold = NumberUtil.expSmooth(beatThreshold, math.clamp(longEnvelope + 0.11 + spectralFlux * 0.1, 0.13, 0.58), cleanDelta, 1.6)
 
-	local beatScore = math.max(transient * 0.82 + spectralFlux * 0.45, bass * 0.28 + peak * 0.22)
+	local beatScore = math.max(transient * 1.05 + spectralFlux * 0.72, bass * 0.52 + peak * 0.34)
 	local beat = false
 	local beatStrength = 0
 	if beatScore > beatThreshold and now - lastBeatTime > 0.18 then
 		beat = true
-		beatStrength = math.clamp((beatScore - beatThreshold) / math.max(0.08, 1 - beatThreshold), 0.22, 1)
+		beatStrength = math.clamp((beatScore - beatThreshold) / math.max(0.08, 1 - beatThreshold) * 1.55, 0.35, 1)
 		lastBeatTime = now
 	end
 
@@ -305,6 +333,7 @@ local function applyAnalysis(rawBands: { number }, rawRms: number, rawPeak: numb
 		transient = transient,
 		spectralFlux = spectralFlux,
 		centroid = centroid,
+		visualEnergy = visualEnergy,
 		bands = smoothedBands,
 		time = now,
 	}
@@ -313,8 +342,8 @@ local function applyAnalysis(rawBands: { number }, rawRms: number, rawPeak: numb
 end
 
 local function readAnalyzerFrame(analyzer: AudioAnalyzer, deltaTime: number)
-	local rms = clamp01(readNumberProperty(analyzer, "RmsLevel", 0) * sensitivity)
-	local peak = clamp01(readNumberProperty(analyzer, "PeakLevel", rms) * sensitivity)
+	local rms = clamp01(readNumberProperty(analyzer, "RmsLevel", 0))
+	local peak = clamp01(readNumberProperty(analyzer, "PeakLevel", rms))
 	local spectrum: { any } = {}
 
 	local okSpectrum, spectrumValues = pcall(function()
@@ -328,7 +357,7 @@ local function readAnalyzerFrame(analyzer: AudioAnalyzer, deltaTime: number)
 end
 
 local function readClassicSoundFrame(sound: Sound, deltaTime: number)
-	local loudness = clamp01(readNumberProperty(sound, "PlaybackLoudness", 0) / 900 * sensitivity)
+	local loudness = clamp01(readNumberProperty(sound, "PlaybackLoudness", 0) / 900)
 	local peak = clamp01(loudness * 1.2)
 	applyAnalysis(resampleSpectrum({}, loudness, peak, os.clock()), loudness, peak, deltaTime)
 end
@@ -517,7 +546,7 @@ function AudioController:_GenerateDemoFrame(deltaTime: number)
 
 	local t = demoTime
 	local bands = table.create(bandCount, 0)
-	local kickPulse = math.max(0, math.sin(t * math.pi * 2 * 1.08)) ^ 9
+	local kickPulse = math.max(0, math.sin(t * math.pi * 2 * 1.08)) ^ 7
 	local snarePulse = math.max(0, math.sin(t * math.pi * 2 * 0.54 + math.pi * 0.85)) ^ 10
 	local hatPulse = math.max(0, math.sin(t * math.pi * 2 * 4.35 + 0.4)) ^ 8
 	local groove = (math.sin(t * math.pi * 2 * 0.18) + 1) * 0.5
@@ -534,9 +563,9 @@ function AudioController:_GenerateDemoFrame(deltaTime: number)
 		local airShape = alpha ^ 4
 		local value = 0.025
 			+ groove * 0.04
-			+ bassSwell * bassShape * 0.18
-			+ kickPulse * bassShape * 0.78
-			+ kickPulse * lowMidShape * 0.18
+			+ bassSwell * bassShape * 0.2
+			+ kickPulse * bassShape * 0.92
+			+ kickPulse * lowMidShape * 0.22
 			+ snarePulse * (midShape * 0.52 + highShape * 0.2)
 			+ hatPulse * (highShape * 0.38 + airShape * 0.32)
 			+ motion * noise * (0.08 + alpha * 0.1)
@@ -544,8 +573,8 @@ function AudioController:_GenerateDemoFrame(deltaTime: number)
 		bands[index] = clamp01(value)
 	end
 
-	local rms = clamp01(0.12 + groove * 0.08 + bassSwell * 0.12 + kickPulse * 0.36 + snarePulse * 0.12 + hatPulse * 0.06)
-	local peak = clamp01(rms + kickPulse * 0.28 + snarePulse * 0.18 + hatPulse * 0.12)
+	local rms = clamp01(0.12 + groove * 0.08 + bassSwell * 0.13 + kickPulse * 0.42 + snarePulse * 0.12 + hatPulse * 0.06)
+	local peak = clamp01(rms + kickPulse * 0.34 + snarePulse * 0.18 + hatPulse * 0.12)
 	applyAnalysis(bands, rms, peak, deltaTime)
 end
 

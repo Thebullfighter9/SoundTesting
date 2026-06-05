@@ -20,12 +20,16 @@ local started = false
 local context: any = nil
 local maid = Maid.new()
 local screenGui: ScreenGui? = nil
-local dock: Frame? = nil
+local nowPlayingPill: Frame? = nil
+local bottomDock: Frame? = nil
+local pillStroke: UIStroke? = nil
 local dockStroke: UIStroke? = nil
+local songIdStroke: UIStroke? = nil
 local statusLabel: TextLabel? = nil
-local sourceLabel: TextLabel? = nil
-local tuningLabel: TextLabel? = nil
-local assetBox: TextBox? = nil
+local songIdBox: TextBox? = nil
+local sensValueLabel: TextLabel? = nil
+local motionValueLabel: TextLabel? = nil
+local sprayValueLabel: TextLabel? = nil
 local marbleRemote: RemoteEvent? = nil
 local lastMarbleRequest = 0
 local lastReadoutUpdate = 0
@@ -33,6 +37,9 @@ local statusOverride = ""
 local statusOverrideUntil = 0
 local activeAudioButton = "PlayBase"
 local glow = 0
+local songHighlight = 1
+local songHighlightUntil = 0
+local songIdFocused = false
 
 local palette = Constants.PALETTE
 local analyzerBars: { Frame } = {}
@@ -51,13 +58,12 @@ local function expectChild(parent: Instance, name: string, className: string): I
 	return child
 end
 
-local function getStroke(button: TextButton): UIStroke?
-	local stroke = button:FindFirstChildOfClass("UIStroke")
-	if stroke ~= nil then
-		return stroke
-	end
+local function findButton(parent: Instance, name: string): TextButton
+	return expectChild(parent, name, "TextButton") :: TextButton
+end
 
-	return nil
+local function getStroke(button: TextButton): UIStroke?
+	return button:FindFirstChildOfClass("UIStroke")
 end
 
 local function setText(label: TextLabel?, text: string)
@@ -161,10 +167,22 @@ local function clearStatusOverride()
 	statusOverrideUntil = 0
 end
 
+local function selectSongText()
+	local box = songIdBox
+	if box == nil then
+		return
+	end
+
+	pcall(function()
+		box.SelectionStart = 1
+		box.CursorPosition = #box.Text + 1
+	end)
+end
+
 local function currentEnergy(): number
 	local audio = context.AudioController
 	local frame = audio:GetFrame()
-	return math.clamp(math.max(frame.peak, frame.bass, frame.rms, frame.beatStrength), 0, 1)
+	return math.clamp(math.max(frame.peak, frame.bass, frame.rms, frame.beatStrength, frame.visualEnergy), 0, 1)
 end
 
 local function requestMarble()
@@ -196,18 +214,11 @@ local function requestMarble()
 	end
 end
 
-local function sourceText(): string
-	local audio = context.AudioController
-	local mode = audio:GetMode()
-	if mode == "Asset" then
-		if activeAudioButton == "PlayBase" then
-			return `Source: {Constants.DEFAULT_AUDIO_LABEL}`
-		end
-		return "Source: Asset"
-	elseif mode == "Mic" then
-		return "Source: Mic"
-	end
-	return "Source: Demo"
+local function playAssetFromBox()
+	activeAudioButton = "PlayAsset"
+	local box = songIdBox
+	context.AudioController:PlayAsset(if box ~= nil then box.Text else "")
+	clearStatusOverride()
 end
 
 local function updateAnalyzerBars()
@@ -229,7 +240,7 @@ local function updateAnalyzerBars()
 		local value = if samples > 0 then total / samples else 0
 		local heightScale = math.clamp(0.08 + value * 0.92, 0.08, 1)
 		bar.Size = UDim2.new(1, 0, heightScale, 0)
-		bar.BackgroundTransparency = math.clamp(0.28 - value * 0.16 + frame.air * 0.04, 0.1, 0.42)
+		bar.BackgroundTransparency = math.clamp(0.3 - value * 0.18 + frame.air * 0.03, 0.08, 0.44)
 		bar.BackgroundColor3 = palette.Cyan:Lerp(palette.CyanSoft, math.clamp(frame.centroid * 0.45 + value * 0.22, 0, 0.62))
 	end
 end
@@ -260,7 +271,6 @@ end
 local function updateReadouts()
 	local audio = context.AudioController
 	local resonance = context.ResonanceController
-	local frame = audio:GetFrame()
 	local statusText = audio:GetStatus()
 
 	if statusOverride ~= "" and os.clock() < statusOverrideUntil then
@@ -277,17 +287,9 @@ local function updateReadouts()
 			else palette.CyanSoft
 	end
 
-	setText(sourceLabel, sourceText())
-	setText(
-		tuningLabel,
-		string.format(
-			"%s  Sens %.2f  Int %.2f  Beat %.2f",
-			resonance:GetStyle(),
-			audio:GetSensitivity(),
-			resonance:GetIntensity(),
-			frame.beatStrength
-		)
-	)
+	setText(sensValueLabel, string.format("%.2f", audio:GetSensitivity()))
+	setText(motionValueLabel, string.format("%.2f", resonance:GetMotion()))
+	setText(sprayValueLabel, string.format("%.2f", resonance:GetSprayAmount()))
 	updateAnalyzerBars()
 	updateSelections()
 end
@@ -302,61 +304,74 @@ local function collectAnalyzerBars(analyzerFrame: Frame)
 	end
 end
 
-local function findButton(parent: Instance, name: string): TextButton
-	return expectChild(parent, name, "TextButton") :: TextButton
-end
-
 local function bindStaticUi()
 	local playerGui = LocalPlayer:WaitForChild("PlayerGui")
 	local gui = expectChild(playerGui, "ArrayWaveGui", "ScreenGui") :: ScreenGui
-	local dockFrame = expectChild(gui, "ControlDock", "Frame") :: Frame
+	local pill = expectChild(gui, "NowPlayingPill", "Frame") :: Frame
+	local dockFrame = expectChild(gui, "BottomControlDock", "Frame") :: Frame
 
 	screenGui = gui
-	dock = dockFrame
+	nowPlayingPill = pill
+	bottomDock = dockFrame
+	pillStroke = pill:FindFirstChildOfClass("UIStroke")
 	dockStroke = dockFrame:FindFirstChildOfClass("UIStroke")
-	statusLabel = expectChild(dockFrame, "Status", "TextLabel") :: TextLabel
-	sourceLabel = expectChild(dockFrame, "Source", "TextLabel") :: TextLabel
-	tuningLabel = expectChild(dockFrame, "Tuning", "TextLabel") :: TextLabel
-	assetBox = expectChild(dockFrame, "AssetIdBox", "TextBox") :: TextBox
+	statusLabel = expectChild(pill, "StatusLabel", "TextLabel") :: TextLabel
+	songIdBox = expectChild(pill, "SongIdBox", "TextBox") :: TextBox
+	songIdStroke = songIdBox:FindFirstChildOfClass("UIStroke")
 
 	gui.Enabled = true
 	gui.ResetOnSpawn = false
-	assetBox.Text = Constants.DEFAULT_AUDIO_ASSET_ID
+	songIdBox.Text = Constants.DEFAULT_AUDIO_ASSET_ID
+	songHighlight = 1
+	songHighlightUntil = os.clock() + 4.5
 
 	local analyzerFrame = expectChild(dockFrame, "AnalyzerStrip", "Frame") :: Frame
 	collectAnalyzerBars(analyzerFrame)
 
-	local baseRow = expectChild(dockFrame, "BaseRow", "Frame")
-	audioButtons.PlayBase = findButton(baseRow, "PlayBaseButton")
-	audioButtons.Demo = findButton(baseRow, "DemoButton")
-	audioButtons.Mic = findButton(baseRow, "MicButton")
+	local transportRow = expectChild(dockFrame, "TransportRow", "Frame")
+	audioButtons.PlayBase = findButton(transportRow, "PlayBaseButton")
+	audioButtons.Demo = findButton(transportRow, "DemoButton")
+	audioButtons.Mic = findButton(transportRow, "MicButton")
+	audioButtons.PlayAsset = findButton(transportRow, "PlayAssetButton")
+	local stopButton = findButton(transportRow, "StopButton")
 
-	local assetRow = expectChild(dockFrame, "AssetRow", "Frame")
-	audioButtons.PlayAsset = findButton(assetRow, "PlayAssetButton")
-	local stopButton = findButton(assetRow, "StopButton")
+	local visualModeRow = expectChild(dockFrame, "VisualModeRow", "Frame")
+	visualButtons.Grid = findButton(visualModeRow, "GridButton")
+	visualButtons.Row = findButton(visualModeRow, "RowButton")
+	visualButtons.Circle = findButton(visualModeRow, "CircleButton")
+	visualButtons.All = findButton(visualModeRow, "AllButton")
+	visualButtons.Minimal = findButton(visualModeRow, "MinimalButton")
 
-	local visualRowA = expectChild(dockFrame, "VisualizerRowA", "Frame")
-	visualButtons.Grid = findButton(visualRowA, "GridButton")
-	visualButtons.Row = findButton(visualRowA, "RowButton")
-	visualButtons.Circle = findButton(visualRowA, "CircleButton")
-
-	local visualRowB = expectChild(dockFrame, "VisualizerRowB", "Frame")
-	visualButtons.All = findButton(visualRowB, "AllButton")
-	visualButtons.Minimal = findButton(visualRowB, "MinimalButton")
-
-	local tuneRowA = expectChild(dockFrame, "TuneRowA", "Frame")
-	local sensMinus = findButton(tuneRowA, "SensMinusButton")
-	local sensPlus = findButton(tuneRowA, "SensPlusButton")
-
-	local tuneRowB = expectChild(dockFrame, "TuneRowB", "Frame")
-	local intMinus = findButton(tuneRowB, "IntMinusButton")
-	local intPlus = findButton(tuneRowB, "IntPlusButton")
+	local feelRow = expectChild(dockFrame, "FeelRow", "Frame")
+	local sensMinus = findButton(feelRow, "SensMinusButton")
+	sensValueLabel = expectChild(feelRow, "SensValueLabel", "TextLabel") :: TextLabel
+	local sensPlus = findButton(feelRow, "SensPlusButton")
+	local motionMinus = findButton(feelRow, "MotionMinusButton")
+	motionValueLabel = expectChild(feelRow, "MotionValueLabel", "TextLabel") :: TextLabel
+	local motionPlus = findButton(feelRow, "MotionPlusButton")
+	local sprayMinus = findButton(feelRow, "SprayMinusButton")
+	sprayValueLabel = expectChild(feelRow, "SprayValueLabel", "TextLabel") :: TextLabel
+	local sprayPlus = findButton(feelRow, "SprayPlusButton")
 
 	local actionRow = expectChild(dockFrame, "ActionRow", "Frame")
 	local pulseTest = findButton(actionRow, "PulseTestButton")
 	local resetView = findButton(actionRow, "ResetViewButton")
 	dropMarbleButton = findButton(actionRow, "DropMarbleButton")
 	dropMarbleButton.Visible = getMarbleRemote() ~= nil
+
+	maid:Give(songIdBox.Focused:Connect(function()
+		songIdFocused = true
+		songHighlight = 1
+		songHighlightUntil = os.clock() + 2.5
+		selectSongText()
+	end))
+	maid:Give(songIdBox.FocusLost:Connect(function(submitted: boolean)
+		songIdFocused = false
+		if submitted then
+			playAssetFromBox()
+			updateReadouts()
+		end
+	end))
 
 	bindButton(audioButtons.PlayBase, function()
 		activeAudioButton = "PlayBase"
@@ -377,10 +392,7 @@ local function bindStaticUi()
 		updateReadouts()
 	end)
 	bindButton(audioButtons.PlayAsset, function()
-		activeAudioButton = "PlayAsset"
-		local box = assetBox
-		context.AudioController:PlayAsset(if box ~= nil then box.Text else "")
-		clearStatusOverride()
+		playAssetFromBox()
 		updateReadouts()
 	end)
 	bindButton(stopButton, function()
@@ -408,19 +420,30 @@ local function bindStaticUi()
 		audio:SetSensitivity(audio:GetSensitivity() + 0.12)
 		updateReadouts()
 	end)
-	bindButton(intMinus, function()
+	bindButton(motionMinus, function()
 		local resonance = context.ResonanceController
-		resonance:SetIntensity(resonance:GetIntensity() - 0.12)
+		resonance:SetMotion(resonance:GetMotion() - 0.12)
 		updateReadouts()
 	end)
-	bindButton(intPlus, function()
+	bindButton(motionPlus, function()
 		local resonance = context.ResonanceController
-		resonance:SetIntensity(resonance:GetIntensity() + 0.12)
+		resonance:SetMotion(resonance:GetMotion() + 0.12)
+		updateReadouts()
+	end)
+	bindButton(sprayMinus, function()
+		local resonance = context.ResonanceController
+		resonance:SetSprayAmount(resonance:GetSprayAmount() - 0.15)
+		updateReadouts()
+	end)
+	bindButton(sprayPlus, function()
+		local resonance = context.ResonanceController
+		resonance:SetSprayAmount(resonance:GetSprayAmount() + 0.15)
 		updateReadouts()
 	end)
 	bindButton(pulseTest, function()
 		context.ResonanceController:TriggerPulse(1)
-		glow = math.max(glow, 0.72)
+		glow = math.max(glow, 0.9)
+		songHighlight = math.max(songHighlight, 0.45)
 		showStatus("Pulse test")
 	end)
 	bindButton(resetView, function()
@@ -464,9 +487,25 @@ function UIController:Start()
 
 	maid:Give(RunService.Heartbeat:Connect(function(deltaTime: number)
 		glow = NumberUtil.expSmooth(glow, 0, deltaTime, 6)
+		local highlightPulse = if os.clock() < songHighlightUntil then (math.sin(os.clock() * 5.2) + 1) * 0.32 + 0.5 else 0
+		local targetHighlight = if songIdFocused then 1 else highlightPulse
+		songHighlight = NumberUtil.expSmooth(songHighlight, targetHighlight, deltaTime, 6)
+
+		local topStroke = pillStroke
+		if topStroke ~= nil then
+			topStroke.Transparency = 0.58 - math.clamp(songHighlight * 0.25, 0, 0.25)
+		end
+
+		local idStroke = songIdStroke
+		if idStroke ~= nil then
+			idStroke.Color = palette.CyanSoft
+			idStroke.Transparency = 0.62 - math.clamp(songHighlight * 0.54, 0, 0.54)
+			idStroke.Thickness = 1 + songHighlight * 0.8
+		end
+
 		local stroke = dockStroke
 		if stroke ~= nil then
-			stroke.Transparency = 0.54 - math.clamp(glow * 0.2, 0, 0.2)
+			stroke.Transparency = 0.58 - math.clamp(glow * 0.24, 0, 0.24)
 		end
 	end))
 end
@@ -476,10 +515,7 @@ function UIController:SetStatus(text: string)
 end
 
 function UIController:PlayAsset()
-	activeAudioButton = "PlayAsset"
-	local box = assetBox
-	context.AudioController:PlayAsset(if box ~= nil then box.Text else "")
-	clearStatusOverride()
+	playAssetFromBox()
 	updateReadouts()
 end
 
@@ -490,11 +526,10 @@ end
 function UIController:Destroy()
 	maid:Cleanup()
 	screenGui = nil
-	dock = nil
+	nowPlayingPill = nil
+	bottomDock = nil
 	statusLabel = nil
-	sourceLabel = nil
-	tuningLabel = nil
-	assetBox = nil
+	songIdBox = nil
 	dropMarbleButton = nil
 end
 

@@ -16,6 +16,7 @@ export type AudioFrame = {
 	transient: number,
 	spectralFlux: number,
 	centroid: number,
+	visualEnergy: number,
 	bands: { number },
 	time: number,
 }

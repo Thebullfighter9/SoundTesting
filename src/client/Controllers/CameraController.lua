@@ -94,7 +94,7 @@ function CameraController:Update(deltaTime: number, frame: AudioFrame, style: Vi
 
 	if frame.beat and frame.time - lastBeatTime > 0.16 then
 		local bassAccent = frame.bass * 0.72
-		local beatAccent = math.max(frame.beatStrength, bassAccent)
+		local beatAccent = math.max(frame.beatStrength, bassAccent, frame.visualEnergy * 0.38)
 		pulse = math.max(pulse, math.clamp(beatAccent, 0, 1))
 		lastBeatTime = frame.time
 	end
@@ -103,8 +103,8 @@ function CameraController:Update(deltaTime: number, frame: AudioFrame, style: Vi
 		baseFov = NumberUtil.expSmooth(baseFov, camera.FieldOfView, deltaTime, 1)
 	end
 
-	local targetFov = baseFov + pulse * 1.55
-	camera.FieldOfView = NumberUtil.expSmooth(camera.FieldOfView, targetFov, deltaTime, 6)
+	local targetFov = baseFov + pulse * 2.35
+	camera.FieldOfView = NumberUtil.expSmooth(camera.FieldOfView, targetFov, deltaTime, 7.5)
 
 	pulse = NumberUtil.expSmooth(pulse, 0, deltaTime, 5)
 end

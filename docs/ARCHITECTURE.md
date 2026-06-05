@@ -24,7 +24,9 @@ Shared constants define the default base song, visual styles, palette, loading t
 
 ## StarterGui
 
-`ArrayWaveGui.model.json` defines the control dock, labels, asset box, analyzer strip, and buttons as a static Rojo UI asset. Client code does not create the UI tree at runtime.
+`ArrayWaveGui.model.json` defines the top-center `NowPlayingPill`, `SongIdBox`, bottom-center `BottomControlDock`, analyzer strip, and buttons as a static Rojo UI asset. Client code does not create the UI tree at runtime.
+
+`NowPlayingPill` owns the current source/status readout and the highlighted song ID field. `BottomControlDock` owns transport, visual mode, Sensitivity, Motion, Spray, Pulse, View, and optional Marble controls.
 
 ## Server
 
@@ -52,8 +54,11 @@ Visual child folders are:
 - `RadialCircle`
 - `Shockwaves`
 - `AccentLights`
+- `LightSprays`
 
-The visualizer pools 441 grid tiles, 96 row bars, 128 radial bars, 8 reusable shockwave rings, and a small accent light set. It updates those instances from one client render loop.
+The visualizer pools 441 grid tiles, 96 row bars, 128 radial bars, 8 reusable shockwave rings, a small accent light set, and 120 local light spray streaks. It updates those instances from one client render loop.
+
+Grid tiles keep per-tile spring state (`currentY`, `velocityY`, `currentHeight`, glow, ripple, and last target). The controller updates both `Size` and `CFrame` so the field rises and scales on beats without creating or destroying parts per frame.
 
 ## Audio Boundary
 

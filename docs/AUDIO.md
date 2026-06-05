@@ -19,6 +19,7 @@ Each frame exposes:
 - `mid`
 - `high`
 - `air`
+- `visualEnergy`
 - `beat`
 - `beatStrength`
 - `transient`
@@ -28,6 +29,12 @@ Each frame exposes:
 - `time`
 
 The controller clamps values to `0..1` and uses `NumberUtil.sanitizeFiniteNumber` to reject NaN and infinite values.
+
+## Visual Gain
+
+Analyzer values can be small even when the audible track feels active. `AudioController` keeps rolling peak and RMS envelopes, derives a clamped `autoGain` between `1.0` and `MAX_VISUAL_GAIN`, and applies a curved response of `1 - exp(-value * 2.4)` before smoothing visual bands.
+
+This gain staging raises quiet tracks without letting loud tracks explode the scene. The final frame exposes normalized bands and `visualEnergy` for grid motion, camera pulse, UI meters, and pooled burst effects.
 
 ## Modular Audio Path
 
@@ -66,6 +73,8 @@ The analysis pipeline maintains:
 - dynamic threshold and cooldown for beat detection
 
 Bass bands use heavier smoothing, while high and air bands respond faster.
+
+`beatStrength`, `transient`, and `spectralFlux` drive crisp visual impulses. Bass pulls motion toward the center grid dome, low-mid creates rolling diagonal waves, mid drives readable tile/bar variation, high and air add edge shimmer and light sprays, and centroid shifts emphasis from center-heavy to edge-heavy motion.
 
 ## Privacy
 
