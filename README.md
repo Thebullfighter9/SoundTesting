@@ -8,7 +8,7 @@ The important detail is the signal label in the top pill:
 
 - `Spectrum` means `AudioAnalyzer:GetSpectrum()` is working. Row mode can act like real frequency bars.
 - `Loudness` means Roblox only gave amplitude data. It still moves, but it is not a per-frequency display.
-- `Demo` means the local demo signal is running.
+- `Demo` means the local demo signal is active.
 - `Silent` means nothing is driving the field.
 
 Views:
@@ -18,11 +18,3 @@ Views:
 - `Circle` wraps the response around the center.
 
 The UI stays small: base song, demo, current view, tune, and the song ID field. There are no keybinds, rounds, quests, NPCs, or simulator panels.
-
-## Run It
-
-```sh
-rojo serve default.project.json
-```
-
-Then connect Roblox Studio to the Rojo server and start Play.
