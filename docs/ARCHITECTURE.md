@@ -1,6 +1,6 @@
 # Architecture
 
-ArrayWave uses a Rojo layout with a clear server/client/shared split.
+ArrayWave uses a Rojo layout with a server/client/shared split.
 
 ```text
 src/replicatedfirst -> ReplicatedFirst
@@ -10,67 +10,50 @@ src/server -> ServerScriptService/Server
 src/client -> StarterPlayer/StarterPlayerScripts/Client
 ```
 
-## ReplicatedFirst
-
-`Loading.client.lua` removes the default Roblox loading screen and creates `ArrayWaveLoadingGui` immediately. It waits for the local player attribute `ArrayWaveClientReady`, with a short minimum display time and a timeout so loading cannot block forever.
-
-`Bootstrap.client.lua` sets `ArrayWaveClientReady` to `false` before controller startup and sets it to `true` after all client controllers have started.
-
 ## Shared
 
 Shared modules contain constants, exported types, remote names, and small utilities. They do not connect events or start loops at require time.
 
-Shared constants define the default base song, visual styles, palette, loading timings, visual counts, audio band count, and UI analyzer count.
+`Constants.lua` defines the default song, visual counts, visual tuning, camera settings, palette, and UI sizing.
 
 ## StarterGui
 
-`ArrayWaveGui.model.json` defines the top-center `NowPlayingPill`, `SongIdBox`, bottom-center `BottomControlDock`, collapsed controls, and `TuneDrawer` as a static Rojo UI asset. Client code does not create the UI tree at runtime.
+`ArrayWaveGui.model.json` is the static UI model. `UIController` binds named instances from that model and does not build the UI tree at runtime.
 
-`NowPlayingPill` owns the current source/status readout and the highlighted song ID field. `BottomControlDock` starts collapsed with a few media-style controls. The `TuneDrawer` holds source, visual mode, Sensitivity, Motion, Spray, camera mode, Pulse, and optional Marble controls.
+The first-join UI is intentionally small: a top song pill and a collapsed bottom dock. Tune opens the extra source, view, feel, camera, and pulse controls. The optional marble button is kept out of the normal visible UI.
 
 ## Server
 
 Server modules own replicated world setup and optional server effects:
 
 - `RemoteService` creates the remotes folder and `MarbleRequested`.
-- `GalleryService` rebuilds the matte gallery room, platform, anchor grid, and marble container.
+- `GalleryService` rebuilds the gallery room, platform, anchor grid, and marble container.
 - `MarbleService` validates marble requests and spawns temporary server-owned marbles.
 
-The server does not receive per-frame audio, mic, spectrum, band, or beat data.
+The server does not receive per-frame audio, mic, spectrum, band, beat, camera, or visualizer state.
 
 ## Client
 
 Client controllers own presentation and UI-only controls:
 
-- `AudioController` produces rich audio frames in Demo, Asset, or Mic mode.
-- `ResonanceController` creates and updates the local-only ArrayWave visualizer under `Workspace/ArrayWaveClientVisuals`.
-- `CameraController` owns the scriptable orbit camera, camera mode switching, subtle audio-reactive FOV/distance changes, and local-only avatar hiding.
-- `UIController` binds behavior to the static `ArrayWaveGui` instances, owns all project controls, and sends optional marble requests.
+- `AudioController` produces local audio frames in Demo, Asset, or Mic mode.
+- `ResonanceController` creates and updates the local-only visualizer under `Workspace/ArrayWaveClientVisuals`.
+- `CameraController` owns the scriptable orbit camera and local avatar hiding.
+- `UIController` binds the static UI and sends the optional marble request only when that hidden control is used.
 
-Visual child folders are:
+`ResonanceController` creates pooled visuals once, then updates them from one client render loop:
 
-- `GridArray`
-- `RowBars`
-- `RadialCircle`
-- `Shockwaves`
-- `AccentLights`
-- `LightSprays`
+- 441 grid tiles
+- 96 row bars and 96 peak caps
+- 128 radial circle bars
+- reusable shockwave rings
+- faint persistent waveform rings
+- accent lights
+- 120 light spray streaks
 
-The visualizer pools 441 grid tiles, 96 row bars, 128 radial bars, 8 reusable shockwave rings, a small accent light set, and 120 local light spray streaks. It updates those instances from one client render loop.
+Grid, Row, and Circle each keep per-element motion state. Bars and tiles are assigned band indices, secondary bands, phase offsets, smoothing values, glow, and spring velocity. This lets neighboring elements stay continuous without moving identically.
 
-Grid tiles keep per-tile spring state (`currentY`, `velocityY`, `currentHeight`, glow, ripple, and last target). The controller updates both `Size` and `CFrame` so the field rises and scales on beats without creating or destroying parts per frame.
-
-## Audio Boundary
-
-Audio analysis is local presentation state. Spectrum, RMS, peak, beat, band values, microphone state, and asset loudness are not sent to the server.
-
-Camera mode, camera movement, local player hiding, and visualizer state are also client-only.
-
-The client only sends a marble request when the player uses the optional UI control. The payload contains optional cosmetic energy only.
-
-## Remote Boundary
-
-The only gameplay remote is `MarbleRequested`, sent client to server. The server ignores client position, velocity, color, size, and ownership claims. It clamps energy, rate-limits requests, enforces the active marble limit, and owns the spawned physics bodies.
+The controller writes low-rate test attributes to `Workspace.ArrayWaveClientVisuals`, including variance and active effect counts. These attributes are for Studio checks only and are not shown in the UI.
 
 ## Lifecycle
 

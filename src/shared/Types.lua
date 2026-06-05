@@ -22,6 +22,19 @@ export type AudioFrame = {
 	time: number,
 }
 
+export type VisualStats = {
+	gridParts: number,
+	rowBars: number,
+	circleBars: number,
+	rowHeightVariance: number,
+	circleLengthVariance: number,
+	gridHeightVariance: number,
+	activeSprays: number,
+	activeShockwaves: number,
+	maxRecentGridJump: number,
+	lastBeatStrength: number,
+}
+
 export type MarblePayload = {
 	energy: number?,
 }

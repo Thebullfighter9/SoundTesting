@@ -31,7 +31,8 @@ local collapsedControls: Frame? = nil
 local tuneDrawer: Frame? = nil
 local tuneButton: TextButton? = nil
 local currentModeButton: TextButton? = nil
-local compactCameraButton: TextButton? = nil
+local compactDemoButton: TextButton? = nil
+local analyzerFrame: Frame? = nil
 local pillStroke: UIStroke? = nil
 local dockStroke: UIStroke? = nil
 local songIdStroke: UIStroke? = nil
@@ -62,8 +63,6 @@ local buttonStrokes: { [TextButton]: UIStroke } = {}
 local selectedButtons: { [TextButton]: boolean } = {}
 local focusedButtons: { [TextButton]: boolean } = {}
 local hoveredButtons: { [TextButton]: boolean } = {}
-
-local CAMERA_MODES: { CameraMode } = { "Auto", "Still", "Wide", "Close" }
 
 local function expectChild(parent: Instance, name: string, className: string): Instance
 	local child = parent:WaitForChild(name, 8)
@@ -277,6 +276,10 @@ local function updateAnalyzerBars()
 	if drawer ~= nil and not drawer.Visible then
 		return
 	end
+	local analyzer = analyzerFrame
+	if analyzer == nil or not analyzer.Visible then
+		return
+	end
 
 	local audio = context.AudioController
 	local frame = audio:GetFrame()
@@ -316,20 +319,6 @@ local function cycleVisualStyle()
 	resonance:SetStyle(styles[nextIndex] :: VisualStyle)
 end
 
-local function cycleCameraMode()
-	local camera = context.CameraController
-	local currentMode = camera:GetMode()
-	local nextIndex = 1
-	for index, cameraMode in ipairs(CAMERA_MODES) do
-		if cameraMode == currentMode then
-			nextIndex = if index >= #CAMERA_MODES then 1 else index + 1
-			break
-		end
-	end
-
-	camera:SetMode(CAMERA_MODES[nextIndex])
-end
-
 local function updateCameraMode(nextMode: CameraMode)
 	context.CameraController:SetMode(nextMode)
 end
@@ -364,7 +353,6 @@ local function updateSelections()
 
 	setButtonSelected(tuneButton, isTuneOpen)
 	setText(currentModeButton, visualStyle)
-	setText(compactCameraButton, cameraMode)
 end
 
 local function updateReadouts()
@@ -429,9 +417,9 @@ local function bindStaticUi()
 	songHighlightUntil = os.clock() + 3.25
 
 	local compactPlayBase = findButton(collapsed, "CompactPlayBaseButton")
+	compactDemoButton = findButton(collapsed, "CompactDemoButton")
 	currentModeButton = findButton(collapsed, "CurrentModeButton")
 	tuneButton = findButton(collapsed, "TuneButton")
-	compactCameraButton = findButton(collapsed, "CompactCameraButton")
 
 	local sourceRow = expectChild(drawer, "SourceRow", "Frame")
 	audioButtons.PlayBase = findButton(sourceRow, "PlayBaseButton")
@@ -465,10 +453,11 @@ local function bindStaticUi()
 	cameraButtons.Close = findButton(cameraActionRow, "CameraCloseButton")
 	local pulseTest = findButton(cameraActionRow, "PulseTestButton")
 	dropMarbleButton = findButton(cameraActionRow, "DropMarbleButton")
-	dropMarbleButton.Visible = getMarbleRemote() ~= nil
+	dropMarbleButton.Visible = false
 
-	local analyzerFrame = expectChild(drawer, "AnalyzerStrip", "Frame") :: Frame
-	collectAnalyzerBars(analyzerFrame)
+	analyzerFrame = expectChild(drawer, "AnalyzerStrip", "Frame") :: Frame
+	analyzerFrame.Visible = false
+	collectAnalyzerBars(analyzerFrame :: Frame)
 
 	maid:Give(songIdBox.Focused:Connect(function()
 		songIdFocused = true
@@ -493,6 +482,12 @@ local function bindStaticUi()
 
 	bindButton(compactPlayBase, playBase)
 	bindButton(audioButtons.PlayBase, playBase)
+	bindButton(compactDemoButton :: TextButton, function()
+		activeAudioButton = "Demo"
+		context.AudioController:SetMode("Demo")
+		clearStatusOverride()
+		updateReadouts()
+	end)
 	bindButton(audioButtons.Demo, function()
 		activeAudioButton = "Demo"
 		context.AudioController:SetMode("Demo")
@@ -529,10 +524,6 @@ local function bindStaticUi()
 	end
 
 	bindButton(tuneButton :: TextButton, toggleTune)
-	bindButton(compactCameraButton :: TextButton, function()
-		cycleCameraMode()
-		updateReadouts()
-	end)
 	for cameraMode, button in pairs(cameraButtons) do
 		local capturedMode = cameraMode :: CameraMode
 		bindButton(button, function()
@@ -671,6 +662,7 @@ function UIController:Destroy()
 	bottomDock = nil
 	collapsedControls = nil
 	tuneDrawer = nil
+	analyzerFrame = nil
 	statusLabel = nil
 	songIdBox = nil
 	dropMarbleButton = nil

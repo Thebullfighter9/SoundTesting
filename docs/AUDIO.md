@@ -1,81 +1,43 @@
 # Audio
 
-ArrayWave keeps audio analysis local to the client. Audio frames are presentation data and do not cross the network.
+ArrayWave keeps audio analysis on the client. Audio frames are presentation data and are not replicated.
 
 ## Base Song
 
-The default base song is Roblox audio asset `9043887091`. `AudioController` attempts this asset automatically on startup, and the UI asset field is prefilled with the same ID.
+The default base song is Roblox audio asset `9043887091`. `AudioController` tries it on startup, and the UI song field starts with the same ID.
 
-If the asset is private, blocked for the experience, unavailable, or the audio graph fails, the controller reports `Base song unavailable - using demo signal` and starts Demo mode without errors.
+If the asset is blocked, private, unavailable, or the audio graph fails, the controller switches to Demo mode.
 
-## Audio Frame
+## Frame Data
 
-Each frame exposes:
+Each frame exposes RMS, peak, 96 normalized bands, bass, low-mid, mid, high, air, transient energy, spectral flux, beat strength, centroid, visual energy, and time.
 
-- `rms`
-- `peak`
-- `bass`
-- `lowMid`
-- `mid`
-- `high`
-- `air`
-- `visualEnergy`
-- `beat`
-- `beatStrength`
-- `transient`
-- `spectralFlux`
-- `centroid`
-- `bands`
-- `time`
+Analyzer and fallback values are sanitized with `NumberUtil.sanitizeFiniteNumber` and clamped to `0..1`.
 
-The controller clamps values to `0..1` and uses `NumberUtil.sanitizeFiniteNumber` to reject NaN and infinite values.
+## Normalization
 
-## Visual Gain
+Analyzer values are often small, so `AudioController` keeps rolling RMS, rolling peak, and per-band peak memory. It derives smooth auto-gain for the full signal and for each band, then uses a curved visual response:
 
-Analyzer values can be small even when the audible track feels active. `AudioController` keeps rolling peak and RMS envelopes, derives a clamped `autoGain` between `1.0` and `MAX_VISUAL_GAIN`, and applies a curved response of `1 - exp(-value * 2.4)` before smoothing visual bands.
+```lua
+visual = 1 - math.exp(-raw * gain * curve)
+```
 
-This gain staging raises quiet tracks without letting loud tracks explode the scene. The final frame exposes normalized bands and `visualEnergy` for grid motion, camera movement/FOV, UI meters, and pooled burst effects.
+This raises quiet tracks without making loud tracks hit full motion all the time. A small visual floor is only applied when real energy is present, so silence still settles.
 
-## Modular Audio Path
+## Band Mapping
 
-Asset mode first attempts a modular audio graph:
+The visualizer samples bands with interpolation instead of integer-only indexing.
 
-- `AudioPlayer`
-- `AudioAnalyzer`
-- `Wire`
-- `AudioDeviceOutput`
+Row bars use curved band placement, a secondary harmonic band, per-bar attack/release, spring motion, and peak caps.
 
-Mic mode attempts:
+Grid tiles combine assigned bands with bass center motion, low-mid diagonal waves, mid sculpting, high/air edge shimmer, and pooled beat ripples.
 
-- `AudioDeviceInput`
-- `AudioAnalyzer`
-- `Wire`
+Circle bars combine direct bands, neighboring bands, centroid focus, beat pulses, and phase offsets so energy travels around the rim instead of pulsing all bars at once.
 
-Graph construction, property assignment, wiring, playback, and analyzer reads are wrapped with `pcall`. Analyzer reads prefer `RmsLevel`, `PeakLevel`, and `GetSpectrum()` when supported.
+## Demo Mode
 
-## Fallbacks
+Demo mode creates kick-like bass pulses, snare-like mid hits, high-hat shimmer, slow groove movement, and 96 non-flat bands. It is meant to exercise Grid, Row, and Circle without depending on an available asset.
 
-If spectrum data is unavailable, the controller synthesizes detailed bands from RMS, peak, and time so the visualizer still has a musical shape.
+## Network Boundary
 
-If the modular asset path cannot play or analyze, the client tries a local `Sound` with `SoundId = "rbxassetid://9043887091"` for the base song or the requested asset ID, then reads `PlaybackLoudness`.
-
-If the classic `Sound` path also fails, or if microphone support is unavailable, Demo mode starts. Demo mode creates kick-like bass pulses, snare-like mid hits, high-hat shimmer, slow groove variation, and 96 non-flat bands.
-
-## Beat Detection
-
-The analysis pipeline maintains:
-
-- attack/release-smoothed bands
-- short and long energy envelopes
-- positive spectral flux
-- transient energy from envelope difference
-- normalized spectral centroid
-- dynamic threshold and cooldown for beat detection
-
-Bass bands use heavier smoothing, while high and air bands respond faster.
-
-`beatStrength`, `transient`, and `spectralFlux` drive crisp visual impulses. Bass pulls motion toward the center grid dome, low-mid creates rolling diagonal waves, mid drives readable tile/bar variation, high and air add edge shimmer and light sprays, and centroid shifts emphasis from center-heavy to edge-heavy motion.
-
-## Privacy
-
-Raw audio samples, raw microphone data, spectrum arrays, RMS, peak, band values, loudness, beat values, camera state, and visualizer state are never saved and never sent to the server.
+Raw audio, microphone data, spectrum arrays, RMS, peak, bands, beat values, camera state, and visualizer state are never sent to the server.

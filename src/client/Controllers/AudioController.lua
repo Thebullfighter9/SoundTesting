@@ -43,6 +43,8 @@ local classicSound: Sound? = nil
 local bandCount = Constants.AUDIO_BAND_COUNT or Constants.VISUAL_BAND_COUNT
 local smoothedBands: { number } = table.create(bandCount, 0)
 local previousBands: { number } = table.create(bandCount, 0)
+local rollingBandPeaks: { number } = table.create(bandCount, 0.05)
+local perBandAutoGain: { number } = table.create(bandCount, 1)
 local currentFrame: AudioFrame = {
 	rms = 0,
 	peak = 0,
@@ -72,6 +74,22 @@ end
 
 local function clamp01(value: any): number
 	return math.clamp(NumberUtil.sanitizeFiniteNumber(value, 0), 0, 1)
+end
+
+local function getBandInterpolated(bands: { number }, normalizedIndex: number): number
+	local count = #bands
+	if count <= 0 then
+		return 0
+	end
+
+	local cleanIndex = math.clamp(NumberUtil.sanitizeFiniteNumber(normalizedIndex, 0), 0, 1)
+	local position = cleanIndex * (count - 1) + 1
+	local lowerIndex = math.clamp(math.floor(position), 1, count)
+	local upperIndex = math.clamp(lowerIndex + 1, 1, count)
+	local alpha = position - lowerIndex
+	local lower = clamp01(bands[lowerIndex] or 0)
+	local upper = clamp01(bands[upperIndex] or lower)
+	return lower + (upper - lower) * alpha
 end
 
 local function setStatus(nextStatus: string)
@@ -204,8 +222,10 @@ local function resampleSpectrum(spectrum: { any }, rms: number, peak: number, ti
 	end
 
 	for bandIndex = 1, bandCount do
-		local startIndex = math.max(1, math.floor((bandIndex - 1) / bandCount * sourceCount) + 1)
-		local endIndex = math.max(startIndex, math.floor(bandIndex / bandCount * sourceCount))
+		local startAlpha = ((bandIndex - 1) / bandCount) ^ 1.42
+		local endAlpha = (bandIndex / bandCount) ^ 1.42
+		local startIndex = math.max(1, math.floor(startAlpha * sourceCount) + 1)
+		local endIndex = math.max(startIndex, math.floor(endAlpha * sourceCount))
 		local total = 0
 		local samples = 0
 
@@ -256,7 +276,8 @@ local function applyAnalysis(rawBands: { number }, rawRms: number, rawPeak: numb
 	end
 	rawBandEnergy /= math.max(1, bandCount)
 
-	local inputPeak = math.max(sanitizedPeak, sanitizedRms, rawBandEnergy, Constants.MIN_VISIBLE_ENERGY)
+	local rawInputEnergy = math.max(sanitizedPeak, sanitizedRms, rawBandEnergy)
+	local inputPeak = math.max(rawInputEnergy, Constants.MIN_VISIBLE_ENERGY)
 	local peakSpeed = if inputPeak > rollingPeak then 16 else 0.85
 	local rmsSpeed = if sanitizedRms > rollingRms then 10 else 0.65
 	rollingPeak = NumberUtil.expSmooth(rollingPeak, inputPeak, cleanDelta, peakSpeed)
@@ -266,14 +287,31 @@ local function applyAnalysis(rawBands: { number }, rawRms: number, rawPeak: numb
 	local targetGain = math.clamp(0.68 / gainBase, 1, Constants.MAX_VISUAL_GAIN)
 	autoGain = NumberUtil.expSmooth(autoGain, targetGain, cleanDelta, if targetGain > autoGain then 3.5 else 0.9)
 
-	local function normalizeForVisual(value: number): number
-		local gained = math.clamp(value * sensitivity * autoGain, 0, 8)
-		return clamp01(1 - math.exp(-gained * 2.4))
+	local function normalizeForVisual(value: number, gain: number, curve: number): number
+		local gained = math.clamp(value * sensitivity * autoGain * gain, 0, 10)
+		return clamp01(1 - math.exp(-gained * curve))
 	end
 
 	for index = 1, bandCount do
 		local alpha = (index - 1) / math.max(1, bandCount - 1)
-		local target = normalizeForVisual(clamp01(rawBands[index] or 0))
+		local raw = clamp01(rawBands[index] or 0)
+		local peakMemory = rollingBandPeaks[index] or 0.05
+		local peakSpeed = if raw > peakMemory then 12 else 0.42
+		peakMemory = NumberUtil.expSmooth(peakMemory, math.max(raw, Constants.MIN_VISIBLE_ENERGY * 0.18), cleanDelta, peakSpeed)
+		rollingBandPeaks[index] = peakMemory
+
+		local targetBandGain = math.clamp(0.36 / math.max(peakMemory, Constants.MIN_VISIBLE_ENERGY * 0.22), 0.85, Constants.MAX_VISUAL_GAIN * 1.25)
+		local bandGain = perBandAutoGain[index] or 1
+		bandGain = NumberUtil.expSmooth(bandGain, targetBandGain, cleanDelta, if targetBandGain > bandGain then 1.7 else 0.48)
+		perBandAutoGain[index] = bandGain
+
+		local curve = 2.15 + (1 - alpha) * 0.34 + alpha * 0.28
+		local target = normalizeForVisual(raw, bandGain, curve)
+		if rawInputEnergy > 0.02 then
+			local visualFloor = Constants.MIN_VISIBLE_ENERGY * (0.08 + alpha * 0.06) * math.clamp(rollingRms * 7, 0, 1)
+			target = math.max(target, visualFloor)
+		end
+
 		local current = smoothedBands[index] or 0
 		local attack = 20 - alpha * 8
 		local release = 3.8 + alpha * 5.5
@@ -298,8 +336,8 @@ local function applyAnalysis(rawBands: { number }, rawRms: number, rawPeak: numb
 	local high = averageRange(smoothedBands, 0.62, 0.84)
 	local air = averageRange(smoothedBands, 0.84, 1)
 	local bandEnergy = math.clamp(energyTotal / math.max(1, bandCount), 0, 1)
-	local normalizedRms = normalizeForVisual(sanitizedRms)
-	local normalizedPeak = normalizeForVisual(sanitizedPeak)
+	local normalizedRms = normalizeForVisual(sanitizedRms, 1, 2.4)
+	local normalizedPeak = normalizeForVisual(sanitizedPeak, 1, 2.4)
 	local rms = clamp01(math.max(normalizedRms, bandEnergy * 0.82, bass * 0.42, Constants.MIN_VISIBLE_ENERGY * 0.65))
 	local peak = clamp01(math.max(normalizedPeak, rms, bass * 0.95, high * 0.76))
 	local centroid = if energyTotal > 0.0001 then math.clamp(centroidNumerator / energyTotal, 0, 1) else 0
@@ -551,11 +589,13 @@ function AudioController:_GenerateDemoFrame(deltaTime: number)
 	local hatPulse = math.max(0, math.sin(t * math.pi * 2 * 4.35 + 0.4)) ^ 8
 	local groove = (math.sin(t * math.pi * 2 * 0.18) + 1) * 0.5
 	local bassSwell = (math.sin(t * math.pi * 2 * 0.27 + 0.3) + 1) * 0.5
+	local traveling = (math.sin(t * math.pi * 2 * 0.36) + 1) * 0.5
 
 	for index = 1, bandCount do
 		local alpha = (index - 1) / math.max(1, bandCount - 1)
 		local noise = (math.noise(t * 0.65, alpha * 8, 0.15) + 1) * 0.5
 		local motion = (math.sin(t * (2.4 + alpha * 5.8) + alpha * math.pi * 9) + 1) * 0.5
+		local comb = (math.sin(t * (3.6 + alpha * 6.2) - alpha * math.pi * 14 + traveling * 2.2) + 1) * 0.5
 		local bassShape = math.max(0, 1 - alpha * 4.4)
 		local lowMidShape = math.max(0, 1 - math.abs(alpha - 0.25) * 5)
 		local midShape = math.max(0, 1 - math.abs(alpha - 0.48) * 4)
@@ -568,7 +608,8 @@ function AudioController:_GenerateDemoFrame(deltaTime: number)
 			+ kickPulse * lowMidShape * 0.22
 			+ snarePulse * (midShape * 0.52 + highShape * 0.2)
 			+ hatPulse * (highShape * 0.38 + airShape * 0.32)
-			+ motion * noise * (0.08 + alpha * 0.1)
+			+ motion * noise * (0.07 + alpha * 0.08)
+			+ comb * (lowMidShape * 0.06 + midShape * 0.08 + highShape * 0.04)
 
 		bands[index] = clamp01(value)
 	end
@@ -680,6 +721,10 @@ end
 
 function AudioController:GetFrame(): AudioFrame
 	return currentFrame
+end
+
+function AudioController:GetBandInterpolated(normalizedIndex: number): number
+	return getBandInterpolated(currentFrame.bands, normalizedIndex)
 end
 
 function AudioController:GetMode(): AudioMode

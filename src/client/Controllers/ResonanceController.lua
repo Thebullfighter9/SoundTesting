@@ -13,17 +13,54 @@ local Maid = require((Util:WaitForChild("Maid") :: ModuleScript))
 local NumberUtil = require((Util:WaitForChild("NumberUtil") :: ModuleScript))
 
 type AudioFrame = Types.AudioFrame
+type VisualStats = Types.VisualStats
 type VisualStyle = Types.VisualStyle
 
-type GridTile = {
+type FrequencyCharacter = {
+	lowWeight: number,
+	bodyWeight: number,
+	presenceWeight: number,
+	shimmerWeight: number,
+	edgeFocus: number,
+	centerFocus: number,
+	beatAccent: number,
+	fluxAccent: number,
+}
+
+type BandMotionState = {
 	part: BasePart,
-	row: number,
-	column: number,
+	cap: BasePart?,
+	index: number,
 	basePosition: Vector3,
+	bandIndex: number,
+	secondaryBandIndex: number,
+	frequencyBias: number,
+	phase: number,
+	attack: number,
+	release: number,
+	stiffness: number,
+	damping: number,
+	current: number,
+	velocity: number,
+	peakHold: number,
+	peakVelocity: number,
+	glow: number,
+	target: number,
+}
+
+type GridTileState = {
+	part: BasePart,
+	xIndex: number,
+	zIndex: number,
+	normalizedX: number,
+	normalizedZ: number,
 	radius: number,
+	normalizedRadius: number,
 	angle: number,
-	centerWeight: number,
-	edgeWeight: number,
+	bandIndex: number,
+	secondaryBandIndex: number,
+	motionBias: number,
+	phase: number,
 	currentY: number,
 	velocityY: number,
 	currentHeight: number,
@@ -32,28 +69,18 @@ type GridTile = {
 	lastTarget: number,
 }
 
-type RowBar = {
-	part: BasePart,
-	peakPart: BasePart,
-	index: number,
-	basePosition: Vector3,
-	peakHeight: number,
-}
-
-type CircleBar = {
-	part: BasePart,
-	index: number,
-	direction: Vector3,
-	baseRadius: number,
-	angle: number,
-}
-
 type ShockwaveRing = {
 	folder: Folder,
 	segments: { BasePart },
 	age: number,
 	strength: number,
 	active: boolean,
+}
+
+type PersistentWaveRing = {
+	segments: { BasePart },
+	radius: number,
+	phase: number,
 }
 
 type AccentLight = {
@@ -76,6 +103,14 @@ type LightSpray = {
 	colorWeight: number,
 }
 
+type GridRipple = {
+	age: number,
+	strength: number,
+	active: boolean,
+	speed: number,
+	width: number,
+}
+
 local ResonanceController = {}
 
 local initialized = false
@@ -83,26 +118,37 @@ local started = false
 local context: any = nil
 local maid = Maid.new()
 local random = Random.new()
-local gridTiles: { GridTile } = {}
-local rowBars: { RowBar } = {}
-local circleBars: { CircleBar } = {}
+local gridTiles: { GridTileState } = {}
+local rowBars: { BandMotionState } = {}
+local circleBars: { BandMotionState } = {}
 local shockwaves: { ShockwaveRing } = {}
+local persistentWaveRings: { PersistentWaveRing } = {}
 local accentLights: { AccentLight } = {}
 local lightSprays: { LightSpray } = {}
+local gridRipples: { GridRipple } = table.create(Constants.GRID_RIPPLE_POOL_SIZE)
 local style: VisualStyle = Constants.DEFAULT_VISUAL_STYLE :: VisualStyle
 local motion = Constants.DEFAULT_MOTION
 local sprayAmount = Constants.DEFAULT_SPRAY_AMOUNT
+local smoothness = Constants.DEFAULT_SMOOTHNESS
 local warnedMissingGallery = false
 local lastBeatTime = 0
 local shockwaveCursor = 1
 local sprayCursor = 1
+local rippleCursor = 1
 local pulseAge = 10
 local pulseStrength = 0
 local maxRecentGridJump = 0
 local lastBeatStrength = 0
 local activeSprayCount = 0
 local activeShockwaveCount = 0
+local activeRippleCount = 0
 local attributeAccumulator = 0
+local rowHeightVariance = 0
+local rowMaxHeight = 0
+local rowActiveCaps = 0
+local gridHeightVariance = 0
+local circleLengthVariance = 0
+local circleActiveWaves = 0
 
 local rootFolder: Folder? = nil
 local gridFolder: Folder? = nil
@@ -146,6 +192,73 @@ end
 
 local function clamp01(value: any): number
 	return math.clamp(NumberUtil.sanitizeFiniteNumber(value, 0), 0, 1)
+end
+
+local function lerp(a: number, b: number, alpha: number): number
+	return a + (b - a) * math.clamp(alpha, 0, 1)
+end
+
+local function springStep(
+	current: number,
+	velocity: number,
+	target: number,
+	stiffness: number,
+	damping: number,
+	deltaTime: number
+): (number, number)
+	local stiffnessScale = lerp(1.18, 0.74, smoothness)
+	local dampingScale = lerp(0.86, 1.24, smoothness)
+	local acceleration = (target - current) * stiffness * stiffnessScale - velocity * damping * dampingScale
+	velocity += acceleration * deltaTime
+	current += velocity * deltaTime
+	return current, velocity
+end
+
+local function getBandInterpolated(frame: AudioFrame, normalizedIndex: number): number
+	local bands = frame.bands
+	local count = #bands
+	if count <= 0 then
+		return 0
+	end
+
+	local cleanIndex = math.clamp(NumberUtil.sanitizeFiniteNumber(normalizedIndex, 0), 0, 1)
+	local position = cleanIndex * (count - 1) + 1
+	local lowerIndex = math.clamp(math.floor(position), 1, count)
+	local upperIndex = math.clamp(lowerIndex + 1, 1, count)
+	local alpha = position - lowerIndex
+	local lower = clamp01(bands[lowerIndex] or 0)
+	local upper = clamp01(bands[upperIndex] or lower)
+	return lower + (upper - lower) * alpha
+end
+
+local function computeVariance(sum: number, sumSquares: number, count: number): number
+	if count <= 0 then
+		return 0
+	end
+
+	local mean = sum / count
+	return math.max(0, sumSquares / count - mean * mean)
+end
+
+local function computeFrequencyCharacter(frame: AudioFrame): FrequencyCharacter
+	local centroid = clamp01(frame.centroid)
+	local beatAccent = clamp01(math.max(frame.beatStrength, frame.bass * 0.3 + frame.transient * 0.6))
+	local fluxAccent = clamp01(math.max(frame.spectralFlux, frame.transient * 0.8))
+	local lowWeight = clamp01(frame.bass * 0.72 + frame.lowMid * 0.32)
+	local bodyWeight = clamp01(frame.lowMid * 0.52 + frame.mid * 0.54)
+	local presenceWeight = clamp01(frame.mid * 0.58 + frame.high * 0.38)
+	local shimmerWeight = clamp01(frame.high * 0.58 + frame.air * 0.64)
+
+	return {
+		lowWeight = lowWeight,
+		bodyWeight = bodyWeight,
+		presenceWeight = presenceWeight,
+		shimmerWeight = shimmerWeight,
+		edgeFocus = clamp01(0.32 + centroid * 0.82 + shimmerWeight * 0.2),
+		centerFocus = clamp01(1.05 - centroid * 0.56 + lowWeight * 0.22),
+		beatAccent = beatAccent,
+		fluxAccent = fluxAccent,
+	}
 end
 
 local function createVisualPart(parent: Instance, name: string, props: { [string]: any }): BasePart
@@ -257,7 +370,8 @@ local function createGrid(center: Vector3)
 	local spacing = Constants.GRID_SPACING
 	local tileWidth = Constants.GRID_TILE_WIDTH
 	local origin = (gridSize - 1) * spacing * -0.5
-	local gridCenter = (gridSize + 1) * 0.5
+	local halfIndex = (gridSize - 1) * 0.5
+	local maxRadius = math.max(1, math.sqrt(2) * halfIndex * spacing)
 
 	for row = 1, gridSize do
 		for column = 1, gridSize do
@@ -265,8 +379,14 @@ local function createGrid(center: Vector3)
 			local z = origin + (row - 1) * spacing
 			local localPosition = Vector3.new(x, 0, z)
 			local basePosition = center + Vector3.new(x, 0, z)
-			local normalizedDistance = math.sqrt((row - gridCenter) ^ 2 + (column - gridCenter) ^ 2) / gridCenter
-			local centerWeight = math.clamp(1 - normalizedDistance, 0, 1)
+			local normalizedX = (column - 1 - halfIndex) / math.max(1, halfIndex)
+			local normalizedZ = (row - 1 - halfIndex) / math.max(1, halfIndex)
+			local normalizedRadius = math.clamp(localPosition.Magnitude / maxRadius, 0, 1)
+			local angle = math.atan2(z, x)
+			local angleBand = (math.sin(angle * 2.0) + 1) * 0.045
+			local bandIndex = math.clamp(normalizedRadius ^ 1.34 * 0.88 + angleBand, 0, 1)
+			local secondaryBandIndex = math.clamp(bandIndex * 0.62 + 0.18 + math.cos(angle * 3) * 0.05, 0, 1)
+			local motionBias = 0.88 + ((math.noise(row * 0.37, column * 0.41, 0.2) + 1) * 0.5) * 0.28
 			local tile = createVisualPart(folder, `Grid_{row}_{column}`, {
 				CFrame = CFrame.new(basePosition + Vector3.new(0, Constants.GRID_MIN_HEIGHT * 0.5, 0)),
 				Size = Vector3.new(tileWidth, Constants.GRID_MIN_HEIGHT, tileWidth),
@@ -278,13 +398,17 @@ local function createGrid(center: Vector3)
 
 			table.insert(gridTiles, {
 				part = tile,
-				row = row,
-				column = column,
-				basePosition = basePosition,
+				xIndex = column,
+				zIndex = row,
+				normalizedX = normalizedX,
+				normalizedZ = normalizedZ,
 				radius = localPosition.Magnitude,
-				angle = math.atan2(z, x),
-				centerWeight = centerWeight,
-				edgeWeight = 1 - centerWeight,
+				normalizedRadius = normalizedRadius,
+				angle = angle,
+				bandIndex = bandIndex,
+				secondaryBandIndex = secondaryBandIndex,
+				motionBias = motionBias,
+				phase = row * 0.47 + column * 0.31 + angle,
 				currentY = 0,
 				velocityY = 0,
 				currentHeight = Constants.GRID_MIN_HEIGHT,
@@ -306,6 +430,9 @@ local function createRowBars(center: Vector3)
 	local rowBase = center + Vector3.new(0, 0.15, 17.2)
 
 	for index = 1, count do
+		local alpha = (index - 1) / math.max(1, count - 1)
+		local bandIndex = alpha ^ 1.48
+		local secondaryBandIndex = math.clamp(bandIndex * 1.76 + 0.04 + math.sin(alpha * math.pi * 2) * 0.025, 0, 1)
 		local position = rowBase + Vector3.new(origin + (index - 1) * spacing, 0, 0)
 		local bar = createVisualPart(folder, `RowBar_{index}`, {
 			CFrame = CFrame.new(position + Vector3.new(0, Constants.ROW_MIN_HEIGHT * 0.5, 0)),
@@ -327,10 +454,23 @@ local function createRowBars(center: Vector3)
 
 		table.insert(rowBars, {
 			part = bar,
-			peakPart = peakPart,
+			cap = peakPart,
 			index = index,
 			basePosition = position,
-			peakHeight = Constants.ROW_MIN_HEIGHT,
+			bandIndex = bandIndex,
+			secondaryBandIndex = secondaryBandIndex,
+			frequencyBias = alpha,
+			phase = alpha * math.pi * 5.5 + random:NextNumber(-0.12, 0.12),
+			attack = lerp(8.5, 20.5, alpha),
+			release = lerp(2.8, 7.2, alpha),
+			stiffness = lerp(Constants.ROW_SPRING_STIFFNESS_LOW, Constants.ROW_SPRING_STIFFNESS_HIGH, alpha),
+			damping = lerp(Constants.ROW_DAMPING_LOW, Constants.ROW_DAMPING_HIGH, alpha),
+			current = Constants.ROW_MIN_HEIGHT,
+			velocity = 0,
+			peakHold = Constants.ROW_MIN_HEIGHT + 0.34,
+			peakVelocity = 0,
+			glow = 0,
+			target = Constants.ROW_MIN_HEIGHT,
 		})
 	end
 end
@@ -344,6 +484,8 @@ local function createRadialCircle(center: Vector3)
 		local alpha = (index - 1) / count
 		local angle = alpha * math.pi * 2
 		local direction = Vector3.new(math.cos(angle), 0, math.sin(angle))
+		local bandIndex = math.clamp((alpha + math.sin(angle * 3) * 0.018 + 0.035) % 1, 0, 1)
+		local secondaryBandIndex = math.clamp((bandIndex * 1.42 + 0.18) % 1, 0, 1)
 		local position = center + direction * radius + Vector3.new(0, 2.55, 0)
 		local bar = createVisualPart(folder, `CircleBar_{index}`, {
 			CFrame = CFrame.lookAt(position, position + direction),
@@ -356,10 +498,23 @@ local function createRadialCircle(center: Vector3)
 
 		table.insert(circleBars, {
 			part = bar,
+			cap = nil,
 			index = index,
-			direction = direction,
-			baseRadius = radius,
-			angle = angle,
+			basePosition = center + direction * radius,
+			bandIndex = bandIndex,
+			secondaryBandIndex = secondaryBandIndex,
+			frequencyBias = alpha,
+			phase = angle + random:NextNumber(-0.08, 0.08),
+			attack = lerp(13, 24, alpha),
+			release = lerp(4.5, 8.5, alpha),
+			stiffness = lerp(22, 42, alpha),
+			damping = lerp(8, 12, alpha),
+			current = Constants.CIRCLE_MIN_LENGTH,
+			velocity = 0,
+			peakHold = Constants.CIRCLE_MIN_LENGTH,
+			peakVelocity = 0,
+			glow = 0,
+			target = Constants.CIRCLE_MIN_LENGTH,
 		})
 	end
 end
@@ -392,6 +547,38 @@ local function createShockwaves(center: Vector3)
 			age = 1,
 			strength = 0,
 			active = false,
+		})
+	end
+end
+
+local function createPersistentWaveRings(center: Vector3)
+	local folder = assert(shockwaveFolder, "Shockwave folder missing")
+	local ringRoot = createFolder(folder, "CircleWaveRings")
+
+	for ringIndex = 1, Constants.CIRCLE_WAVE_RING_COUNT do
+		local segments: { BasePart } = {}
+		local radius = 9.5 + ringIndex * 2.75
+		local ringFolder = createFolder(ringRoot, `WaveRing_{ringIndex}`)
+		for segmentIndex = 1, Constants.SHOCKWAVE_SEGMENT_COUNT do
+			local alpha = (segmentIndex - 1) / Constants.SHOCKWAVE_SEGMENT_COUNT
+			local angle = alpha * math.pi * 2
+			local direction = Vector3.new(math.cos(angle), 0, math.sin(angle))
+			local position = center + direction * radius + Vector3.new(0, 2.2, 0)
+			local segment = createVisualPart(ringFolder, `Wave_{segmentIndex}`, {
+				CFrame = CFrame.lookAt(position, position + direction),
+				Size = Vector3.new(0.055, 0.04, 0.9),
+				Color = palette.CyanSoft,
+				Material = Enum.Material.Neon,
+				Transparency = 0.88,
+			})
+			segment:SetAttribute("BaseTransparency", 0.88)
+			table.insert(segments, segment)
+		end
+
+		table.insert(persistentWaveRings, {
+			segments = segments,
+			radius = radius,
+			phase = ringIndex * math.pi * 0.42,
 		})
 	end
 end
@@ -458,17 +645,31 @@ local function createLightSprays(center: Vector3)
 	end
 end
 
+local function initializeGridRipples()
+	table.clear(gridRipples)
+	for _ = 1, Constants.GRID_RIPPLE_POOL_SIZE do
+		table.insert(gridRipples, {
+			age = 2,
+			strength = 0,
+			active = false,
+			speed = 32,
+			width = 3.2,
+		})
+	end
+end
+
 local function synthesizeBands(frame: AudioFrame): { number }
 	local bands = table.create(audioBandCount, 0)
 	local timeNow = if frame.time > 0 then frame.time else os.clock()
 	local energy = math.clamp(math.max(frame.rms, frame.peak * 0.85, frame.visualEnergy, 0.24), 0, 1)
 
 	for index = 1, audioBandCount do
-		local alpha = (index - 1) / audioBandCount
-		local wave = (math.sin(timeNow * 3.8 + alpha * math.pi * 5.5) + 1) * 0.5
-		local shimmer = (math.sin(timeNow * 12 + alpha * math.pi * 22) + 1) * 0.5
-		local bassShape = math.max(0, 1 - alpha * 3) * frame.bass
-		bands[index] = math.clamp(energy * (0.24 + wave * 0.32 + shimmer * alpha * 0.16) + bassShape * 0.52, 0, 1)
+		local alpha = (index - 1) / math.max(1, audioBandCount - 1)
+		local wave = (math.sin(timeNow * 3.4 + alpha * math.pi * 5.5) + 1) * 0.5
+		local shimmer = (math.sin(timeNow * 11.5 + alpha * math.pi * 20.5) + 1) * 0.5
+		local bassShape = math.max(0, 1 - alpha * 3.2) * frame.bass
+		local midShape = math.max(0, 1 - math.abs(alpha - 0.48) * 3.2) * frame.mid
+		bands[index] = math.clamp(energy * (0.18 + wave * 0.26 + shimmer * alpha * 0.12) + bassShape * 0.52 + midShape * 0.22, 0, 1)
 	end
 
 	return bands
@@ -529,13 +730,6 @@ local function getSafeFrame(): AudioFrame
 	return cleanFrame
 end
 
-local function getBand(frame: AudioFrame, index: number): number
-	local bands = frame.bands
-	local count = math.max(1, #bands)
-	local value = bands[((index - 1) % count) + 1]
-	return clamp01(value)
-end
-
 local function activateShockwave(strength: number)
 	if #shockwaves == 0 then
 		return
@@ -552,10 +746,58 @@ local function activateShockwave(strength: number)
 	ring.active = true
 end
 
+local function activateGridRipple(strength: number)
+	if #gridRipples == 0 then
+		return
+	end
+
+	local ripple = gridRipples[rippleCursor]
+	rippleCursor += 1
+	if rippleCursor > #gridRipples then
+		rippleCursor = 1
+	end
+
+	ripple.age = 0
+	ripple.strength = math.clamp(strength, 0.18, 1)
+	ripple.active = true
+	ripple.speed = 26 + strength * 16
+	ripple.width = 2.4 + strength * 2.1
+end
+
 local function activateAccentBurst(strength: number)
 	for _, accent in ipairs(accentLights) do
 		accent.burst = math.max(accent.burst, strength)
 	end
+end
+
+local function getSprayStart(): Vector3
+	local choice = random:NextInteger(1, if style == "All" then 3 else 1)
+	if style == "Row" or choice == 2 then
+		local rowBar = rowBars[random:NextInteger(1, math.max(1, #rowBars))]
+		if rowBar ~= nil then
+			return rowBar.basePosition + Vector3.new(0, math.max(rowBar.current, rowBar.peakHold), 0)
+		end
+	elseif style == "Circle" or choice == 3 then
+		local angle = random:NextNumber(0, math.pi * 2)
+		local direction = Vector3.new(math.cos(angle), 0, math.sin(angle))
+		return visualCenter + direction * random:NextNumber(12.5, 17.2) + Vector3.new(0, random:NextNumber(2.4, 4.2), 0)
+	end
+
+	local side = random:NextInteger(1, 4)
+	local half = Constants.GRID_SPACING * (Constants.GRID_SIZE - 1) * 0.5
+	local offsetX = random:NextNumber(-half, half)
+	local offsetZ = random:NextNumber(-half, half)
+	if side == 1 then
+		offsetX = half
+	elseif side == 2 then
+		offsetX = -half
+	elseif side == 3 then
+		offsetZ = half
+	else
+		offsetZ = -half
+	end
+
+	return visualCenter + Vector3.new(offsetX, random:NextNumber(1.3, 3.5), offsetZ)
 end
 
 local function activateSprays(strength: number, fullBurst: boolean)
@@ -566,21 +808,22 @@ local function activateSprays(strength: number, fullBurst: boolean)
 		return
 	end
 
-	local styleScale = 0.55
+	local styleScale = 1
 	if style == "All" then
-		styleScale = Constants.ALL_MODE_SPRAY_MULTIPLIER
+		styleScale = Constants.ALL_MODE_SPRAY_MULTIPLIER + 0.42
 	elseif style == "Minimal" then
 		styleScale = Constants.MINIMAL_MODE_SPRAY_MULTIPLIER
 	elseif style == "Row" then
-		styleScale = 0.42
+		styleScale = 0.78
 	elseif style == "Circle" then
-		styleScale = 0.62
+		styleScale = 0.9
 	end
 
-	local effectiveSpray = if fullBurst then math.max(sprayAmount, 1) else sprayAmount
-	local baseCount = if fullBurst then 26 + strength * 20 else 6 + strength * 20
-	local requestedCount = math.floor(baseCount * effectiveSpray * styleScale)
-	local count = math.clamp(requestedCount, if style == "Minimal" then 0 else 3, Constants.LIGHT_SPRAY_POOL_SIZE)
+	local lowCount = if fullBurst then 24 else if strength >= 0.72 then 12 else 4
+	local highCount = if fullBurst then 42 else if strength >= 0.72 then 24 else 14
+	local effectiveSpray = if fullBurst then math.max(0.9, sprayAmount) else 0.65 + sprayAmount * 0.55
+	local requestedCount = math.floor(lerp(lowCount, highCount, strength) * effectiveSpray * styleScale)
+	local count = math.clamp(requestedCount, if style == "Minimal" then 0 else lowCount, math.min(highCount, Constants.LIGHT_SPRAY_POOL_SIZE))
 	if count <= 0 then
 		return
 	end
@@ -592,22 +835,27 @@ local function activateSprays(strength: number, fullBurst: boolean)
 			sprayCursor = 1
 		end
 
-		local angle = random:NextNumber(0, math.pi * 2)
-		local direction = Vector3.new(math.cos(angle), 0, math.sin(angle))
+		local start = getSprayStart()
+		local outward = start - visualCenter
+		local direction = Vector3.new(outward.X, 0, outward.Z)
+		if direction.Magnitude < 0.001 then
+			local angle = random:NextNumber(0, math.pi * 2)
+			direction = Vector3.new(math.cos(angle), 0, math.sin(angle))
+		else
+			direction = direction.Unit
+		end
 		local tangent = Vector3.new(-direction.Z, 0, direction.X)
-		local rimRadius = random:NextNumber(10.2, 14.8)
-		local upward = random:NextNumber(5.4, 10.2) * (0.76 + strength * 0.42)
-		local radialSpeed = random:NextNumber(9, 18) * (0.7 + strength * 0.58)
-		local sideSpeed = random:NextNumber(-2.8, 2.8)
-		local start = visualCenter + direction * rimRadius + Vector3.new(0, random:NextNumber(1.8, 3.4), 0)
+		local upward = random:NextNumber(4.8, 8.4) * (0.78 + strength * 0.34)
+		local radialSpeed = random:NextNumber(7.5, 15) * (0.68 + strength * 0.44)
+		local sideSpeed = random:NextNumber(-1.8, 1.8)
 
 		spray.active = true
 		spray.position = start
 		spray.velocity = direction * radialSpeed + tangent * sideSpeed + Vector3.new(0, upward, 0)
 		spray.life = 0
-		spray.maxLife = random:NextNumber(0.25, 0.7)
-		spray.size = random:NextNumber(0.58, 1.18) * (0.82 + strength * 0.32)
-		spray.spin = random:NextNumber(-1.6, 1.6)
+		spray.maxLife = random:NextNumber(0.22, 0.58)
+		spray.size = random:NextNumber(0.46, 0.95) * (0.82 + strength * 0.25)
+		spray.spin = random:NextNumber(-1.1, 1.1)
 		spray.colorWeight = random:NextNumber(0, 1)
 	end
 end
@@ -619,126 +867,280 @@ local function activatePulse(strength: number, fullSprayBurst: boolean?)
 	lastBeatStrength = cleanStrength
 
 	activateShockwave(cleanStrength)
+	activateGridRipple(cleanStrength)
 	activateSprays(cleanStrength, fullSprayBurst == true)
 	activateAccentBurst(cleanStrength)
 
 	for _, tile in ipairs(gridTiles) do
-		local centerImpulse = Constants.GRID_BEAT_IMPULSE * (0.24 + tile.centerWeight * 1.08)
-		local radialImpulse = math.max(0, 1 - math.abs(tile.radius - 5.5) / 7) * 2.2
-		tile.velocityY += (centerImpulse + radialImpulse) * cleanStrength * motion
+		local centerImpulse = Constants.GRID_BEAT_IMPULSE * (0.16 + (1 - tile.normalizedRadius) ^ 1.45 * 0.92)
+		local radialMatch = math.max(0, 1 - math.abs(tile.radius - 5.5) / 7) * 1.8
+		tile.velocityY += (centerImpulse + radialMatch) * cleanStrength * motion * tile.motionBias
 		tile.ripple = math.max(tile.ripple, cleanStrength)
 		tile.glow = math.max(tile.glow, cleanStrength)
 	end
 end
 
-local function updateGrid(frame: AudioFrame, energy: number, deltaTime: number): number
+local function updateGridRipples(deltaTime: number)
+	activeRippleCount = 0
+	for _, ripple in ipairs(gridRipples) do
+		if ripple.active then
+			ripple.age += deltaTime
+			if ripple.age > 1.15 then
+				ripple.active = false
+			else
+				activeRippleCount += 1
+			end
+		end
+	end
+end
+
+local function getGridRippleValue(tile: GridTileState): number
+	local value = 0
+	for _, ripple in ipairs(gridRipples) do
+		if ripple.active then
+			local waveRadius = ripple.age * ripple.speed
+			local fade = math.clamp(1 - ripple.age / 1.15, 0, 1)
+			local distanceMatch = math.max(0, 1 - math.abs(tile.radius - waveRadius) / ripple.width)
+			value += distanceMatch ^ 2 * ripple.strength * fade
+		end
+	end
+	return math.clamp(value, 0, 1.4)
+end
+
+local function updateGrid(frame: AudioFrame, character: FrequencyCharacter, energy: number, deltaTime: number): number
 	local timeNow = frame.time
 	local minimal = style == "Minimal"
 	local visible = style == "Grid" or style == "All" or style == "Minimal"
-	local pulse = math.clamp(1 - pulseAge / 0.45, 0, 1) * pulseStrength
-	local centroidEdge = math.clamp(frame.centroid, 0, 1)
 	local maxJump = 0
+	local sum = 0
+	local sumSquares = 0
 
-	for index, tile in ipairs(gridTiles) do
-		local band = getBand(frame, index + tile.row * 5 + tile.column * 2)
-		local centerFocus = 1 - centroidEdge * 0.35
-		local edgeFocus = 0.45 + centroidEdge * 1.15
-		local dome = frame.bass ^ 1.25 * tile.centerWeight * centerFocus * (Constants.GRID_MAX_JUMP * 0.72)
-		local diagonal = (math.sin(timeNow * 5.8 + (tile.row + tile.column) * 0.34) + 1) * 0.5 * frame.lowMid * 2.4
-		local midRipple = (math.sin(timeNow * 4.6 - tile.radius * 0.62 + tile.angle * 1.6) + 1) * 0.5 * frame.mid * 2.2
-		local beatRipple = math.max(0, 1 - math.abs(tile.radius - pulseAge * 45) / 4.4) * pulse * 4.8
-		local highShimmer = (math.sin(timeNow * 16 + tile.angle * 6 + tile.radius * 0.72) + 1) * 0.5 * (frame.high + frame.air * 0.5) * tile.edgeWeight * edgeFocus * 0.72
-		local visibleFloor = Constants.MIN_VISIBLE_ENERGY * (0.7 + energy * 0.7)
-		local beatLift = math.max(frame.beatStrength, frame.transient * 1.35) * tile.centerWeight * Constants.GRID_BEAT_IMPULSE * 1.15
-		local targetY = visibleFloor + band ^ 0.9 * 2.25 + dome + diagonal + midRipple + beatRipple + beatLift + highShimmer
-		targetY *= motion
+	for _, tile in ipairs(gridTiles) do
+		local directBand = getBandInterpolated(frame, tile.bandIndex)
+		local secondaryBand = getBandInterpolated(frame, tile.secondaryBandIndex)
+		local centerWeight = (1 - tile.normalizedRadius) ^ 1.75
+		local middleWeight = math.max(0, 1 - math.abs(tile.normalizedRadius - 0.48) * 2.4)
+		local edgeWeight = tile.normalizedRadius ^ 1.7
+		local bassDome = frame.bass ^ 1.2 * centerWeight * character.centerFocus * Constants.GRID_CENTER_BASS_GAIN
+		local diagonalPhase = (tile.normalizedX + tile.normalizedZ) * 4.4 + tile.phase
+		local diagonal = ((math.sin(timeNow * 2.65 + diagonalPhase) + 1) * 0.5) * character.bodyWeight * Constants.GRID_WAVE_GAIN * middleWeight
+		local bandWave = (directBand * 0.72 + secondaryBand * 0.28) ^ 0.72 * (1.0 + middleWeight * 0.65) * 2.85
+		local midSculpt = ((math.sin(timeNow * 2.1 - tile.radius * 0.48 + tile.angle * 1.8) + 1) * 0.5)
+			* character.presenceWeight
+			* middleWeight
+			* 2.15
+		local ripple = getGridRippleValue(tile)
+		local beatRipple = ripple * (2.4 + character.beatAccent * 2.1) * (0.58 + centerWeight * 0.42)
+		local shimmerPhase = math.sin(timeNow * 12.5 + tile.angle * 5.5 + tile.radius * 0.66 + tile.phase)
+		local edgeShimmer = (shimmerPhase + 1) * 0.5 * character.shimmerWeight * edgeWeight * character.edgeFocus * Constants.GRID_EDGE_HIGH_GAIN
+		local visibleFloor = Constants.MIN_VISIBLE_ENERGY * (0.28 + energy * 0.55)
+		local targetY = visibleFloor + bassDome + diagonal + bandWave + midSculpt + beatRipple + edgeShimmer
+		targetY *= motion * tile.motionBias
 		if minimal then
-			targetY *= 0.34
+			targetY *= 0.32
 		end
 		targetY = math.clamp(targetY, 0, Constants.GRID_MAX_JUMP)
 
 		tile.lastTarget = targetY
-		tile.ripple = NumberUtil.expSmooth(tile.ripple, 0, deltaTime, 5.2)
-		tile.glow = NumberUtil.expSmooth(tile.glow, math.max(highShimmer, pulse * tile.centerWeight), deltaTime, 8)
-
-		local acceleration = (targetY - tile.currentY) * Constants.GRID_SPRING_STIFFNESS - tile.velocityY * Constants.GRID_SPRING_DAMPING
-		tile.velocityY += acceleration * deltaTime
-		tile.currentY = math.clamp(tile.currentY + tile.velocityY * deltaTime, -0.24, Constants.GRID_MAX_JUMP + 2.2)
+		tile.ripple = NumberUtil.expSmooth(tile.ripple, ripple, deltaTime, 8)
+		tile.glow = NumberUtil.expSmooth(tile.glow, math.max(edgeShimmer * 0.32, ripple * 0.65, directBand * 0.24), deltaTime, 7.5)
+		tile.currentY, tile.velocityY = springStep(
+			tile.currentY,
+			tile.velocityY,
+			targetY,
+			Constants.GRID_SPRING_STIFFNESS,
+			Constants.GRID_SPRING_DAMPING,
+			deltaTime
+		)
+		tile.currentY = math.clamp(tile.currentY, -0.22, Constants.GRID_MAX_JUMP + 2.2)
 		maxJump = math.max(maxJump, tile.currentY)
 
 		local targetHeight = Constants.GRID_MIN_HEIGHT
-			+ band ^ 0.72 * 3.6
-			+ tile.currentY * 0.95
-			+ frame.transient * 2.2
-			+ tile.ripple * tile.centerWeight * 2.4
-			+ highShimmer * 0.9
-		targetHeight *= if minimal then 0.45 else motion
+			+ bandWave * 0.9
+			+ tile.currentY * 0.82
+			+ character.fluxAccent * (0.45 + edgeWeight * 0.8)
+			+ tile.ripple * (0.42 + centerWeight * 1.4)
+			+ edgeShimmer * 0.72
+		targetHeight *= if minimal then 0.46 else 1
 		targetHeight = math.clamp(targetHeight, Constants.GRID_MIN_HEIGHT, Constants.GRID_MAX_HEIGHT)
-		tile.currentHeight = NumberUtil.expSmooth(tile.currentHeight, targetHeight, deltaTime, 18)
+		tile.currentHeight = NumberUtil.expSmooth(tile.currentHeight, targetHeight, deltaTime, lerp(12, 21, 1 - smoothness))
 
-		local brightness = math.clamp(band * 0.34 + tile.glow * 0.48 + frame.air * tile.edgeWeight * 0.24, 0, if minimal then 0.32 else 0.88)
-		local transparency = if minimal then 0.46 else math.clamp(0.13 - brightness * 0.08, 0.035, 0.17)
-		local width = Constants.GRID_TILE_WIDTH + math.clamp(tile.glow * 0.1 + band * 0.06, 0, 0.16)
+		local normalizedHeight = math.clamp(tile.currentY / math.max(1, Constants.GRID_MAX_JUMP), 0, 1)
+		sum += normalizedHeight
+		sumSquares += normalizedHeight * normalizedHeight
+
+		local brightness = math.clamp(directBand * 0.28 + tile.glow * 0.48 + frame.air * edgeWeight * 0.18, 0, if minimal then 0.3 else 0.82)
+		local transparency = if minimal then 0.48 else math.clamp(0.13 - brightness * 0.08, 0.035, 0.18)
+		local width = Constants.GRID_TILE_WIDTH + math.clamp(tile.glow * 0.08 + directBand * 0.05, 0, 0.13)
 
 		tile.part.Size = Vector3.new(width, tile.currentHeight, width)
-		tile.part.CFrame = CFrame.new(tile.basePosition + Vector3.new(0, tile.currentY + tile.currentHeight * 0.5, 0))
+		tile.part.CFrame = CFrame.new(tile.part.Position:Lerp(tile.basePosition + Vector3.new(0, tile.currentY + tile.currentHeight * 0.5, 0), 0.82))
 		tile.part.Color = palette.Text:Lerp(palette.CyanSoft, brightness)
 		tile.part.Transparency = if visible then transparency else 1
 		tile.part:SetAttribute("BaseTransparency", transparency)
 	end
 
+	gridHeightVariance = computeVariance(sum, sumSquares, #gridTiles)
 	return maxJump
 end
 
-local function updateRow(frame: AudioFrame, energy: number, deltaTime: number)
+local function updateRow(frame: AudioFrame, character: FrequencyCharacter, energy: number, deltaTime: number)
 	local visible = style == "Row" or style == "All"
+	local sum = 0
+	local sumSquares = 0
+	rowMaxHeight = 0
+	rowActiveCaps = 0
+
 	for _, rowBar in ipairs(rowBars) do
-		local alpha = (rowBar.index - 1) / math.max(1, Constants.ROW_BAR_COUNT - 1)
-		local band = getBand(frame, math.floor(alpha * audioBandCount) + 1)
-		local leftWeight = math.max(0, 1 - alpha * 2.8)
-		local centerWeight = math.max(0, 1 - math.abs(alpha - 0.44) * 3)
-		local rightWeight = alpha ^ 1.6
-		local body = frame.bass * leftWeight * 5.2 + frame.lowMid * centerWeight * 4.2 + frame.mid * 3.8 + frame.high * rightWeight * 3.1
-		local variation = (math.sin(frame.time * 5.2 + alpha * math.pi * 7) + 1) * 0.5 * frame.mid * 2
-		local globalPulse = math.max(frame.beatStrength, pulseStrength * math.clamp(1 - pulseAge / 0.34, 0, 1)) * 2.8
-		local height = math.clamp(Constants.ROW_MIN_HEIGHT + (band ^ 0.74 * 12.8 + body + variation + energy * 2.2 + globalPulse) * motion, Constants.ROW_MIN_HEIGHT, Constants.ROW_MAX_HEIGHT)
+		local alpha = rowBar.frequencyBias
+		local direct = getBandInterpolated(frame, rowBar.bandIndex)
+		local neighborOffset = math.sin(rowBar.phase + frame.time * 0.2) * 0.014
+		local neighbor = getBandInterpolated(frame, math.clamp(rowBar.bandIndex + neighborOffset, 0, 1))
+		local harmonic = getBandInterpolated(frame, rowBar.secondaryBandIndex)
+		local lowWeight = math.max(0, 1 - alpha * 3.2)
+		local bodyWeight = math.max(0, 1 - math.abs(alpha - 0.28) * 3.4)
+		local presenceWeight = math.max(0, 1 - math.abs(alpha - 0.55) * 2.8)
+		local shimmerWeight = alpha ^ 1.55
+		local phaseWave = (math.sin(frame.time * 3.2 - alpha * math.pi * 3.2 + rowBar.phase) + 1) * 0.5
+		local waveLag = phaseWave * character.bodyWeight * 0.22
+		local region = frame.bass * lowWeight * 0.46
+			+ frame.lowMid * bodyWeight * 0.36
+			+ frame.mid * presenceWeight * 0.42
+			+ frame.high * shimmerWeight * 0.28
+		local accent = character.fluxAccent * (0.12 + shimmerWeight * 0.18) + character.beatAccent * lowWeight * 0.2
+		local power = math.clamp(direct * 0.62 + neighbor * 0.16 + harmonic * 0.13 + region + waveLag + accent + energy * 0.05, 0, 1.4)
+		local curved = 1 - math.exp(-power * Constants.ROW_HEIGHT_CURVE)
+		local heightTarget = Constants.ROW_MIN_HEIGHT + curved * (Constants.ROW_MAX_HEIGHT - Constants.ROW_MIN_HEIGHT) * 0.82 * motion
+		heightTarget = math.clamp(heightTarget, Constants.ROW_MIN_HEIGHT, Constants.ROW_MAX_HEIGHT)
 
-		rowBar.peakHeight = math.max(height + 0.34, rowBar.peakHeight - deltaTime * (5.8 + frame.spectralFlux * 8))
-		rowBar.peakHeight = math.clamp(rowBar.peakHeight, Constants.ROW_MIN_HEIGHT, Constants.ROW_MAX_HEIGHT + 0.8)
-		rowBar.part.Size = Vector3.new(0.32 + frame.lowMid * 0.08, height, 0.56)
-		rowBar.part.CFrame = CFrame.new(rowBar.basePosition + Vector3.new(0, height * 0.5, 0))
-		rowBar.part.Color = palette.Text:Lerp(palette.Cyan, math.clamp(band * 0.5 + frame.mid * 0.22 + rightWeight * frame.high * 0.28, 0, 0.82))
-		rowBar.part.Transparency = if visible then 0.08 else 1
-		rowBar.part:SetAttribute("BaseTransparency", 0.08)
+		local targetSpeed = if heightTarget > rowBar.target then rowBar.attack else rowBar.release
+		rowBar.target = NumberUtil.expSmooth(rowBar.target, heightTarget, deltaTime, targetSpeed)
+		rowBar.current, rowBar.velocity = springStep(rowBar.current, rowBar.velocity, rowBar.target, rowBar.stiffness, rowBar.damping, deltaTime)
+		rowBar.current = math.clamp(rowBar.current, Constants.ROW_MIN_HEIGHT, Constants.ROW_MAX_HEIGHT + 0.5)
+		rowMaxHeight = math.max(rowMaxHeight, rowBar.current)
 
-		rowBar.peakPart.CFrame = CFrame.new(rowBar.basePosition + Vector3.new(0, rowBar.peakHeight, 0))
-		rowBar.peakPart.Transparency = if visible then math.clamp(0.18 - frame.spectralFlux * 0.08, 0.08, 0.3) else 1
-		rowBar.peakPart:SetAttribute("BaseTransparency", rowBar.peakPart.Transparency)
+		local peakTarget = rowBar.current + 0.38 + character.fluxAccent * (0.22 + alpha * 0.3)
+		if peakTarget > rowBar.peakHold then
+			rowBar.peakHold = peakTarget
+			rowBar.peakVelocity = math.max(rowBar.peakVelocity, character.fluxAccent * 1.8 + character.beatAccent * 0.9)
+		else
+			local decay = lerp(Constants.ROW_PEAK_DECAY_LOW, Constants.ROW_PEAK_DECAY_HIGH, alpha)
+			rowBar.peakVelocity = NumberUtil.expSmooth(rowBar.peakVelocity, 0, deltaTime, decay * 0.65)
+			rowBar.peakHold -= deltaTime * (decay * (0.62 + rowBar.peakVelocity * 0.4))
+		end
+		rowBar.peakHold = math.clamp(rowBar.peakHold, Constants.ROW_MIN_HEIGHT + 0.2, Constants.ROW_MAX_HEIGHT + 1.1)
+		if rowBar.peakHold > rowBar.current + 0.62 then
+			rowActiveCaps += 1
+		end
+
+		rowBar.glow = NumberUtil.expSmooth(rowBar.glow, math.clamp(power * 0.55 + accent * 0.6, 0, 1), deltaTime, 8)
+		local width = 0.31 + rowBar.glow * 0.08 + character.fluxAccent * 0.025
+		local depth = 0.54 + rowBar.glow * 0.1
+		rowBar.part.Size = Vector3.new(width, rowBar.current, depth)
+		rowBar.part.CFrame = CFrame.new(rowBar.basePosition + Vector3.new(0, rowBar.current * 0.5, 0))
+		rowBar.part.Color = palette.Text:Lerp(palette.Cyan, math.clamp(power * 0.42 + rowBar.glow * 0.28 + shimmerWeight * frame.high * 0.18, 0, 0.82))
+		rowBar.part.Transparency = if visible then math.clamp(0.1 - rowBar.glow * 0.045, 0.045, 0.16) else 1
+		rowBar.part:SetAttribute("BaseTransparency", rowBar.part.Transparency)
+
+		local cap = rowBar.cap
+		if cap ~= nil then
+			cap.Size = Vector3.new(width + 0.05, 0.075, depth + 0.04)
+			cap.CFrame = CFrame.new(rowBar.basePosition + Vector3.new(0, rowBar.peakHold, 0))
+			cap.Color = palette.CyanSoft:Lerp(palette.Text, math.clamp(character.fluxAccent * 0.22, 0, 0.32))
+			cap.Transparency = if visible then math.clamp(0.24 - rowBar.glow * 0.12 - character.fluxAccent * 0.06, 0.08, 0.34) else 1
+			cap:SetAttribute("BaseTransparency", cap.Transparency)
+		end
+
+		local normalizedHeight = math.clamp(rowBar.current / Constants.ROW_MAX_HEIGHT, 0, 1)
+		sum += normalizedHeight
+		sumSquares += normalizedHeight * normalizedHeight
 	end
+
+	rowHeightVariance = computeVariance(sum, sumSquares, #rowBars)
 end
 
-local function updateCircle(frame: AudioFrame, energy: number)
+local function updateCircle(frame: AudioFrame, character: FrequencyCharacter, energy: number, deltaTime: number)
 	local visible = style == "Circle" or style == "All" or style == "Minimal"
-	local pulse = math.clamp(1 - pulseAge / 0.45, 0, 1) * pulseStrength
-	local bassRadius = frame.bass * 2.8 + pulse * 2.2
-	local centroidPush = frame.centroid * 1.8
+	local minimal = style == "Minimal"
+	local sum = 0
+	local sumSquares = 0
+	local pulse = math.clamp(1 - pulseAge / 0.58, 0, 1) * pulseStrength
+	local bassRadius = frame.bass * 2.4 + pulse * 1.7
+	local centroidPush = frame.centroid * 1.45
 
 	for _, circleBar in ipairs(circleBars) do
-		local alpha = (circleBar.index - 1) / math.max(1, Constants.CIRCLE_BAR_COUNT - 1)
-		local band = getBand(frame, math.floor(alpha * audioBandCount) + 1)
-		local phase = (math.sin(frame.time * 6.4 + circleBar.angle * 7.5) + 1) * 0.5
-		local highTip = (frame.high * 0.95 + frame.air * 0.72) * (0.5 + phase * 0.5)
-		local extension = math.clamp((Constants.CIRCLE_MIN_LENGTH + band ^ 0.72 * 5.8 + frame.mid * 2.7 + highTip * 3.1 + energy * 1.6 + pulse * 2.2) * motion, Constants.CIRCLE_MIN_LENGTH, Constants.CIRCLE_MAX_LENGTH)
-		local radius = circleBar.baseRadius + bassRadius + centroidPush + extension * 0.45
-		local yLift = 2.52 + frame.lowMid * 1.1 + pulse * 0.68
-		local position = visualCenter + Vector3.new(0, yLift, 0) + circleBar.direction * radius
+		local alpha = circleBar.frequencyBias
+		local angle = alpha * math.pi * 2
+		local direction = Vector3.new(math.cos(angle), 0, math.sin(angle))
+		local direct = getBandInterpolated(frame, circleBar.bandIndex)
+		local neighbor = getBandInterpolated(frame, math.clamp(circleBar.bandIndex + 0.025, 0, 1))
+		local harmonic = getBandInterpolated(frame, circleBar.secondaryBandIndex)
+		local traveling = (math.sin(frame.time * (3.2 + Constants.CIRCLE_TRAVEL_SPEED) + circleBar.phase * 2.2) + 1) * 0.5
+		local beatPhase = math.max(0, math.sin(pulseAge * 10 - circleBar.phase * 1.4)) * pulse
+		local centroidInfluence = lerp(character.centerFocus * 0.28, character.edgeFocus * 0.44, alpha)
+		local highTip = (frame.high * 0.72 + frame.air * 0.58) * (0.36 + traveling * 0.64)
+		local power = math.clamp(
+			direct * 0.56
+				+ neighbor * 0.18
+				+ harmonic * 0.12
+				+ frame.mid * 0.22
+				+ highTip * 0.34
+				+ centroidInfluence
+				+ beatPhase * 0.32
+				+ energy * 0.04,
+			0,
+			1.45
+		)
+		local curved = 1 - math.exp(-power * 1.72)
+		local target = math.clamp((Constants.CIRCLE_MIN_LENGTH + curved * (Constants.CIRCLE_MAX_LENGTH - 0.4)) * motion, Constants.CIRCLE_MIN_LENGTH, Constants.CIRCLE_MAX_LENGTH)
+		if minimal then
+			target *= 0.54
+		end
 
-		circleBar.part.Size = Vector3.new(0.14, 0.38 + highTip * 0.5, 1.05 + extension)
-		circleBar.part.CFrame = CFrame.lookAt(position, position + circleBar.direction)
-		circleBar.part.Color = palette.Text:Lerp(palette.CyanSoft, math.clamp(band * 0.44 + highTip * 0.34 + pulse * 0.22, 0, 0.84))
-		local transparency = if style == "Minimal" then 0.5 else math.clamp(0.14 - highTip * 0.09, 0.05, 0.18)
+		local targetSpeed = if target > circleBar.target then circleBar.attack else circleBar.release
+		circleBar.target = NumberUtil.expSmooth(circleBar.target, target, deltaTime, targetSpeed)
+		circleBar.current, circleBar.velocity = springStep(circleBar.current, circleBar.velocity, circleBar.target, circleBar.stiffness, circleBar.damping, deltaTime)
+		circleBar.current = math.clamp(circleBar.current, Constants.CIRCLE_MIN_LENGTH, Constants.CIRCLE_MAX_LENGTH + 0.4)
+		circleBar.glow = NumberUtil.expSmooth(circleBar.glow, math.clamp(highTip * 0.72 + beatPhase * 0.5 + direct * 0.2, 0, 1), deltaTime, 9)
+
+		local radius = 12.4 + bassRadius + centroidPush + circleBar.current * 0.44
+		local yLift = 2.52 + frame.lowMid * 0.86 + pulse * 0.52 + traveling * frame.mid * 0.2
+		local position = visualCenter + Vector3.new(0, yLift, 0) + direction * radius
+		local tipWidth = 0.14 + highTip * 0.08
+		circleBar.part.Size = Vector3.new(tipWidth, 0.36 + highTip * 0.34, 1.0 + circleBar.current)
+		circleBar.part.CFrame = CFrame.lookAt(position, position + direction)
+		circleBar.part.Color = palette.Text:Lerp(palette.CyanSoft, math.clamp(power * 0.38 + circleBar.glow * 0.34, 0, 0.82))
+		local transparency = if minimal then 0.5 else math.clamp(0.14 - circleBar.glow * 0.08, 0.05, 0.18)
 		circleBar.part.Transparency = if visible then transparency else 1
 		circleBar.part:SetAttribute("BaseTransparency", transparency)
+
+		local normalizedLength = math.clamp(circleBar.current / Constants.CIRCLE_MAX_LENGTH, 0, 1)
+		sum += normalizedLength
+		sumSquares += normalizedLength * normalizedLength
+	end
+
+	circleLengthVariance = computeVariance(sum, sumSquares, #circleBars)
+end
+
+local function updatePersistentWaveRings(frame: AudioFrame, character: FrequencyCharacter)
+	local visible = style == "Circle" or style == "All" or style == "Minimal"
+	local pulse = math.clamp(1 - pulseAge / 0.7, 0, 1) * pulseStrength
+	for ringIndex, ring in ipairs(persistentWaveRings) do
+		local radius = ring.radius + frame.bass * (0.8 + ringIndex * 0.24) + pulse * (1.2 + ringIndex * 0.2)
+		local ringGlow = math.clamp(0.1 + frame.mid * 0.16 + character.shimmerWeight * 0.22 + pulse * 0.28, 0, 0.72)
+		for segmentIndex, segment in ipairs(ring.segments) do
+			local alpha = (segmentIndex - 1) / #ring.segments
+			local angle = alpha * math.pi * 2
+			local direction = Vector3.new(math.cos(angle), 0, math.sin(angle))
+			local phase = (math.sin(frame.time * (1.4 + ringIndex * 0.17) + angle * 3.2 + ring.phase) + 1) * 0.5
+			local waveRadius = radius + phase * (0.28 + frame.lowMid * 0.7)
+			local position = visualCenter + Vector3.new(0, 2.22 + ringIndex * 0.11 + phase * frame.mid * 0.22, 0) + direction * waveRadius
+			segment.CFrame = CFrame.lookAt(position, position + direction)
+			segment.Size = Vector3.new(0.055, 0.04, 0.82 + phase * 0.45 + frame.high * 0.42)
+			local transparency = math.clamp(0.9 - ringGlow * 0.28 - phase * 0.04, 0.62, 0.96)
+			segment.Transparency = if visible then transparency else 1
+			segment:SetAttribute("BaseTransparency", transparency)
+		end
 	end
 end
 
@@ -748,7 +1150,7 @@ local function updateShockwaves(deltaTime: number)
 	for _, ring in ipairs(shockwaves) do
 		if ring.active then
 			activeShockwaveCount += 1
-			ring.age += deltaTime / 0.62
+			ring.age += deltaTime / 0.72
 			if ring.age >= 1 then
 				ring.active = false
 				for _, segment in ipairs(ring.segments) do
@@ -758,21 +1160,23 @@ local function updateShockwaves(deltaTime: number)
 			else
 				local alpha = 1 - ring.age
 				local radius = 3.5 + ring.age * 35
-				local visibleScale = if style == "Minimal" then 0.28 else 0.72
-				local transparency = math.clamp(1 - alpha * ring.strength * visibleScale, 0.28, 1)
+				local visibleScale = if style == "Minimal" then 0.24 else 0.66
+				local transparency = math.clamp(1 - alpha * ring.strength * visibleScale, 0.32, 1)
 				for index, segment in ipairs(ring.segments) do
 					local segmentAlpha = (index - 1) / #ring.segments
 					local angle = segmentAlpha * math.pi * 2
 					local direction = Vector3.new(math.cos(angle), 0, math.sin(angle))
-					local position = visualCenter + Vector3.new(0, 2.35 + alpha * 1.05, 0) + direction * radius
+					local position = visualCenter + Vector3.new(0, 2.35 + alpha * 0.85, 0) + direction * radius
 					segment.CFrame = CFrame.lookAt(position, position + direction)
-					segment.Size = Vector3.new(0.11, 0.08, 1.12 + alpha * 2.1)
+					segment.Size = Vector3.new(0.1, 0.07, 1.06 + alpha * 1.85)
 					segment.Transparency = if visible then transparency else 1
 					segment:SetAttribute("BaseTransparency", transparency)
 				end
 			end
 		end
 	end
+
+	circleActiveWaves = activeShockwaveCount + #persistentWaveRings
 end
 
 local function updateLightSprays(deltaTime: number)
@@ -788,14 +1192,14 @@ local function updateLightSprays(deltaTime: number)
 				activeSprayCount += 1
 				local ageAlpha = spray.life / spray.maxLife
 				local fade = 1 - ageAlpha
-				spray.velocity += Vector3.new(0, -10 * deltaTime, 0)
+				spray.velocity += Vector3.new(0, -8.5 * deltaTime, 0)
 				spray.position += spray.velocity * deltaTime
 				local velocityDirection = if spray.velocity.Magnitude > 0.001 then spray.velocity.Unit else Vector3.yAxis
-				local length = (0.55 + spray.velocity.Magnitude * 0.026) * spray.size
-				local transparency = math.clamp(1 - fade * (0.78 + spray.colorWeight * 0.1), 0.08, 1)
-				local color = palette.Cyan:Lerp(palette.Text, 0.28 + spray.colorWeight * 0.48)
+				local length = (0.42 + spray.velocity.Magnitude * 0.022) * spray.size
+				local transparency = math.clamp(1 - fade * (0.72 + spray.colorWeight * 0.08), 0.12, 1)
+				local color = palette.Cyan:Lerp(palette.Text, 0.32 + spray.colorWeight * 0.46)
 
-				spray.part.Size = Vector3.new(0.045 * spray.size, 0.045 * spray.size, length)
+				spray.part.Size = Vector3.new(0.04 * spray.size, 0.04 * spray.size, length)
 				spray.part.CFrame = CFrame.lookAt(spray.position, spray.position + velocityDirection) * CFrame.Angles(0, 0, spray.spin * spray.life)
 				spray.part.Color = color
 				spray.part.Transparency = transparency
@@ -805,24 +1209,24 @@ local function updateLightSprays(deltaTime: number)
 	end
 end
 
-local function updateAccentLights(frame: AudioFrame, deltaTime: number)
+local function updateAccentLights(frame: AudioFrame, character: FrequencyCharacter, deltaTime: number)
 	local visible = style == "Grid" or style == "Row" or style == "Circle" or style == "All"
 	for index, accent in ipairs(accentLights) do
 		accent.burst = NumberUtil.expSmooth(accent.burst, 0, deltaTime, 7)
-		local phase = (math.sin(frame.time * (1.5 + index * 0.07) + accent.angle * 3) + 1) * 0.5
-		local airGlow = (frame.air * 0.72 + frame.high * 0.38 + frame.spectralFlux * 0.24) * phase
+		local phase = (math.sin(frame.time * (1.35 + index * 0.055) + accent.angle * 3) + 1) * 0.5
+		local airGlow = (character.shimmerWeight * 0.68 + character.fluxAccent * 0.2) * phase
 		local burst = accent.burst
 		local position = visualCenter
 			+ Vector3.new(
-				math.cos(accent.angle + frame.time * 0.04) * accent.radius,
-				2.2 + phase * 0.8 + frame.bass * 0.6 + burst * 0.5,
-				math.sin(accent.angle + frame.time * 0.04) * accent.radius
+				math.cos(accent.angle + frame.time * 0.035) * accent.radius,
+				2.15 + phase * 0.7 + frame.bass * 0.5 + burst * 0.42,
+				math.sin(accent.angle + frame.time * 0.035) * accent.radius
 			)
 		accent.part.CFrame = CFrame.new(position)
-		accent.part.Transparency = if visible then math.clamp(0.8 - airGlow * 0.34 - burst * 0.24, 0.32, 0.9) else 1
+		accent.part.Transparency = if visible then math.clamp(0.82 - airGlow * 0.3 - burst * 0.22, 0.34, 0.92) else 1
 		accent.part:SetAttribute("BaseTransparency", accent.part.Transparency)
-		accent.light.Brightness = if visible then math.clamp(0.1 + airGlow * 0.85 + burst * 2.1, 0.05, 2.3) else 0
-		accent.light.Range = math.clamp(7 + burst * 10, 6, 18)
+		accent.light.Brightness = if visible then math.clamp(0.08 + airGlow * 0.78 + burst * 1.8, 0.04, 2.0) else 0
+		accent.light.Range = math.clamp(6.5 + burst * 8, 5.5, 15)
 		accent.light:SetAttribute("BaseBrightness", accent.light.Brightness)
 	end
 end
@@ -842,6 +1246,14 @@ local function updateAttributes(deltaTime: number)
 	root:SetAttribute("GridParts", #gridTiles)
 	root:SetAttribute("RowBars", #rowBars)
 	root:SetAttribute("CircleBars", #circleBars)
+	root:SetAttribute("RowHeightVariance", rowHeightVariance)
+	root:SetAttribute("RowMaxHeight", rowMaxHeight)
+	root:SetAttribute("RowActiveCaps", rowActiveCaps)
+	root:SetAttribute("GridHeightVariance", gridHeightVariance)
+	root:SetAttribute("GridMaxJump", maxRecentGridJump)
+	root:SetAttribute("GridRippleCount", activeRippleCount)
+	root:SetAttribute("CircleLengthVariance", circleLengthVariance)
+	root:SetAttribute("CircleActiveWaves", circleActiveWaves)
 	root:SetAttribute("ActiveSprays", activeSprayCount)
 	root:SetAttribute("ActiveShockwaves", activeShockwaveCount)
 	root:SetAttribute("MaxRecentGridJump", maxRecentGridJump)
@@ -851,26 +1263,29 @@ end
 local function updateVisuals(deltaTime: number)
 	local frame = getSafeFrame()
 	local cleanDelta = math.clamp(NumberUtil.sanitizeFiniteNumber(deltaTime, 1 / 60), 1 / 240, 0.2)
-	local energy = math.clamp((frame.visualEnergy * 0.44 + frame.rms * 0.2 + frame.peak * 0.18 + frame.bass * 0.2 + frame.mid * 0.12 + frame.high * 0.1) * motion, 0, 1)
+	local character = computeFrequencyCharacter(frame)
+	local energy = math.clamp((frame.visualEnergy * 0.38 + frame.rms * 0.18 + frame.peak * 0.16 + frame.bass * 0.2 + frame.mid * 0.12 + frame.high * 0.1) * motion, 0, 1)
 	pulseAge += cleanDelta
-	pulseStrength = NumberUtil.expSmooth(pulseStrength, 0, cleanDelta, 4.8)
+	pulseStrength = NumberUtil.expSmooth(pulseStrength, 0, cleanDelta, 4.6)
 	maxRecentGridJump = NumberUtil.expSmooth(maxRecentGridJump, 0, cleanDelta, 0.85)
 
 	if frame.beat and frame.time - lastBeatTime > 0.08 then
 		lastBeatTime = frame.time
-		activatePulse(math.max(frame.beatStrength, frame.bass * 0.72, frame.spectralFlux * 0.9, 0.38), false)
+		activatePulse(math.max(frame.beatStrength, frame.bass * 0.7, frame.spectralFlux * 0.82, 0.35), false)
 	elseif frame.spectralFlux > 0.42 and frame.transient > 0.14 and frame.time - lastBeatTime > 0.22 then
 		lastBeatTime = frame.time
-		activatePulse(math.max(frame.spectralFlux * 0.85, frame.transient, 0.28), false)
+		activatePulse(math.max(frame.spectralFlux * 0.8, frame.transient, 0.28), false)
 	end
 
-	local gridJump = updateGrid(frame, energy, cleanDelta)
+	updateGridRipples(cleanDelta)
+	local gridJump = updateGrid(frame, character, energy, cleanDelta)
 	maxRecentGridJump = math.max(maxRecentGridJump, gridJump)
-	updateRow(frame, energy, cleanDelta)
-	updateCircle(frame, energy)
+	updateRow(frame, character, energy, cleanDelta)
+	updateCircle(frame, character, energy, cleanDelta)
+	updatePersistentWaveRings(frame, character)
 	updateShockwaves(cleanDelta)
 	updateLightSprays(cleanDelta)
-	updateAccentLights(frame, cleanDelta)
+	updateAccentLights(frame, character, cleanDelta)
 	updateAttributes(cleanDelta)
 
 	local camera = context and context.CameraController
@@ -897,11 +1312,13 @@ function ResonanceController:Start()
 	local center = getGalleryCenter()
 	visualCenter = center
 	getOrCreateRootFolder()
+	initializeGridRipples()
 	createGrid(center)
 	createAccentLights(center)
 	createRowBars(center)
 	createRadialCircle(center)
 	createShockwaves(center)
+	createPersistentWaveRings(center)
 	createLightSprays(center)
 	updateVisibility()
 
@@ -955,6 +1372,14 @@ function ResonanceController:GetSprayAmount(): number
 	return sprayAmount
 end
 
+function ResonanceController:SetSmoothness(value: number)
+	smoothness = math.clamp(NumberUtil.sanitizeFiniteNumber(value, Constants.DEFAULT_SMOOTHNESS), 0.25, 0.92)
+end
+
+function ResonanceController:GetSmoothness(): number
+	return smoothness
+end
+
 function ResonanceController:GetStyle(): VisualStyle
 	return style
 end
@@ -967,15 +1392,22 @@ function ResonanceController:TriggerPulseTest()
 	self:TriggerPulse(1)
 end
 
-function ResonanceController:GetCurrentVisualStats(): { [string]: number }
+function ResonanceController:GetCurrentVisualStats(): VisualStats & { [string]: number }
 	return {
 		gridParts = #gridTiles,
 		rowBars = #rowBars,
 		circleBars = #circleBars,
+		rowHeightVariance = rowHeightVariance,
+		circleLengthVariance = circleLengthVariance,
+		gridHeightVariance = gridHeightVariance,
+		rowActiveCaps = rowActiveCaps,
 		activeSprays = activeSprayCount,
 		activeShockwaves = activeShockwaveCount,
 		maxRecentGridJump = maxRecentGridJump,
 		lastBeatStrength = lastBeatStrength,
+		RowMaxHeight = rowMaxHeight,
+		GridRippleCount = activeRippleCount,
+		CircleActiveWaves = circleActiveWaves,
 		GridArray = #gridTiles,
 		RowBars = #rowBars,
 		RadialCircle = #circleBars,
