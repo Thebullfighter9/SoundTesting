@@ -6,7 +6,7 @@ It starts with Roblox audio asset `9043887091`. If that asset is blocked or unav
 
 ## Overview
 
-The scene is built around one client-side visualizer:
+The scene is built around one client-side visualizer and a slow orbit camera. The local character is hidden so it does not get between the camera and the field.
 
 - `Grid`: a 21 x 21 field of anchored tiles using spring-style motion.
 - `Row`: 96 equalizer bars with peak caps.
@@ -24,7 +24,7 @@ The UI is defined in `src/startergui/ArrayWaveGui.model.json`.
 
 At the top of the screen, `SongIdBox` shows the current audio asset ID. It starts with `9043887091`, and the Asset button uses whatever value is in that box.
 
-The bottom dock contains:
+The bottom dock is collapsed by default. It shows the base audio control, current visual mode, Tune, and camera mode. Tune opens the extra controls:
 
 - Play Base
 - Demo
@@ -34,7 +34,6 @@ The bottom dock contains:
 - Grid, Row, Circle, All, Minimal
 - Sens, Motion, and Spray controls
 - Pulse
-- View
 - Marble, when the optional server remote exists
 
 All project controls are handled through the UI.
@@ -45,7 +44,7 @@ Audio analysis is local to the client. The controller reads analyzer data when R
 
 The frame data includes RMS, peak, frequency bands, bass/mid/high ranges, transient energy, beat strength, spectral flux, centroid, and a normalized visual energy value. Quiet audio is raised with clamped auto-gain so the field does not go flat.
 
-Raw audio, mic data, spectrum arrays, band data, and beat values are not sent to the server.
+Raw audio, mic data, spectrum arrays, band data, beat values, camera state, and visualizer state are not sent to the server.
 
 ## Networking
 

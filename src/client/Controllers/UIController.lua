@@ -3,15 +3,20 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
+local TweenService = game:GetService("TweenService")
 
 local LocalPlayer = Players.LocalPlayer
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local Constants = require((Shared:WaitForChild("Constants") :: ModuleScript))
+local Types = require((Shared:WaitForChild("Types") :: ModuleScript))
 local Network = Shared:WaitForChild("Network")
 local RemoteNames = require((Network:WaitForChild("RemoteNames") :: ModuleScript))
 local Util = Shared:WaitForChild("Util")
 local Maid = require((Util:WaitForChild("Maid") :: ModuleScript))
 local NumberUtil = require((Util:WaitForChild("NumberUtil") :: ModuleScript))
+
+type CameraMode = Types.CameraMode
+type VisualStyle = Types.VisualStyle
 
 local UIController = {}
 
@@ -22,6 +27,11 @@ local maid = Maid.new()
 local screenGui: ScreenGui? = nil
 local nowPlayingPill: Frame? = nil
 local bottomDock: Frame? = nil
+local collapsedControls: Frame? = nil
+local tuneDrawer: Frame? = nil
+local tuneButton: TextButton? = nil
+local currentModeButton: TextButton? = nil
+local compactCameraButton: TextButton? = nil
 local pillStroke: UIStroke? = nil
 local dockStroke: UIStroke? = nil
 local songIdStroke: UIStroke? = nil
@@ -31,6 +41,7 @@ local sensValueLabel: TextLabel? = nil
 local motionValueLabel: TextLabel? = nil
 local sprayValueLabel: TextLabel? = nil
 local marbleRemote: RemoteEvent? = nil
+local dropMarbleButton: TextButton? = nil
 local lastMarbleRequest = 0
 local lastReadoutUpdate = 0
 local statusOverride = ""
@@ -40,16 +51,19 @@ local glow = 0
 local songHighlight = 1
 local songHighlightUntil = 0
 local songIdFocused = false
+local isTuneOpen = Constants.UI_TUNE_DEFAULT_OPEN
 
 local palette = Constants.PALETTE
 local analyzerBars: { Frame } = {}
 local visualButtons: { [string]: TextButton } = {}
 local audioButtons: { [string]: TextButton } = {}
+local cameraButtons: { [string]: TextButton } = {}
 local buttonStrokes: { [TextButton]: UIStroke } = {}
 local selectedButtons: { [TextButton]: boolean } = {}
 local focusedButtons: { [TextButton]: boolean } = {}
 local hoveredButtons: { [TextButton]: boolean } = {}
-local dropMarbleButton: TextButton? = nil
+
+local CAMERA_MODES: { CameraMode } = { "Auto", "Still", "Wide", "Close" }
 
 local function expectChild(parent: Instance, name: string, className: string): Instance
 	local child = parent:WaitForChild(name, 8)
@@ -62,14 +76,14 @@ local function findButton(parent: Instance, name: string): TextButton
 	return expectChild(parent, name, "TextButton") :: TextButton
 end
 
-local function getStroke(button: TextButton): UIStroke?
-	return button:FindFirstChildOfClass("UIStroke")
-end
-
-local function setText(label: TextLabel?, text: string)
+local function setText(label: any, text: string)
 	if label ~= nil then
 		label.Text = text
 	end
+end
+
+local function getStroke(button: TextButton): UIStroke?
+	return button:FindFirstChildOfClass("UIStroke")
 end
 
 local function getMarbleRemote(): RemoteEvent?
@@ -104,23 +118,23 @@ local function updateButtonVisual(button: TextButton)
 	local stroke = buttonStrokes[button]
 
 	if selected then
-		button.BackgroundColor3 = palette.Cyan:Lerp(palette.SurfaceRaised, 0.54)
-		button.BackgroundTransparency = 0.08
+		button.BackgroundColor3 = palette.Cyan:Lerp(palette.SurfaceRaised, 0.58)
+		button.BackgroundTransparency = 0.06
 		button.TextColor3 = palette.Text
 	elseif focused or hovered then
 		button.BackgroundColor3 = palette.SurfaceRaised:Lerp(palette.Cyan, 0.08)
-		button.BackgroundTransparency = 0.04
+		button.BackgroundTransparency = 0.08
 		button.TextColor3 = palette.Text
 	else
 		button.BackgroundColor3 = palette.SurfaceRaised
-		button.BackgroundTransparency = 0.16
+		button.BackgroundTransparency = 0.18
 		button.TextColor3 = palette.TextMuted:Lerp(palette.Text, 0.38)
 	end
 
 	if stroke ~= nil then
 		stroke.Color = if selected or focused then palette.Cyan else palette.Stroke
-		stroke.Transparency = if selected then 0.14 elseif focused then 0.22 elseif hovered then 0.42 else 0.66
-		stroke.Thickness = if selected or focused then 1.3 else 1
+		stroke.Transparency = if selected then 0.12 elseif focused then 0.22 elseif hovered then 0.44 else 0.7
+		stroke.Thickness = if selected or focused then 1.25 else 1
 	end
 end
 
@@ -208,9 +222,9 @@ local function requestMarble()
 
 	if ok then
 		glow = math.max(glow, math.max(energy, 0.25))
-		showStatus("Marble dropped")
+		showStatus("Marble")
 	else
-		showStatus("Marble request failed")
+		showStatus("Marble failed")
 	end
 end
 
@@ -221,7 +235,49 @@ local function playAssetFromBox()
 	clearStatusOverride()
 end
 
+local function setTuneOpen(open: boolean)
+	isTuneOpen = open
+	local dock = bottomDock
+	local drawer = tuneDrawer
+	if dock == nil or drawer == nil then
+		return
+	end
+
+	if open then
+		drawer.Visible = true
+	end
+
+	local targetHeight = if open then Constants.UI_TUNE_DOCK_HEIGHT else Constants.UI_COLLAPSED_DOCK_HEIGHT
+	local targetSize = UDim2.new(dock.Size.X.Scale, dock.Size.X.Offset, 0, targetHeight)
+	TweenService:Create(dock, TweenInfo.new(0.18, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+		Size = targetSize,
+	}):Play()
+
+	if not open then
+		task.delay(0.19, function()
+			if not isTuneOpen and drawer.Parent ~= nil then
+				drawer.Visible = false
+			end
+		end)
+	end
+
+	local button = tuneButton
+	if button ~= nil then
+		button.Text = if open then "Hide" else "Tune"
+		setButtonSelected(button, open)
+	end
+end
+
+local function toggleTune()
+	setTuneOpen(not isTuneOpen)
+end
+
 local function updateAnalyzerBars()
+	local drawer = tuneDrawer
+	if drawer ~= nil and not drawer.Visible then
+		return
+	end
+
 	local audio = context.AudioController
 	local frame = audio:GetFrame()
 	local bands = frame.bands
@@ -238,18 +294,53 @@ local function updateAnalyzerBars()
 			samples += 1
 		end
 		local value = if samples > 0 then total / samples else 0
-		local heightScale = math.clamp(0.08 + value * 0.92, 0.08, 1)
+		local heightScale = math.clamp(0.1 + value * 0.9, 0.1, 1)
 		bar.Size = UDim2.new(1, 0, heightScale, 0)
-		bar.BackgroundTransparency = math.clamp(0.3 - value * 0.18 + frame.air * 0.03, 0.08, 0.44)
-		bar.BackgroundColor3 = palette.Cyan:Lerp(palette.CyanSoft, math.clamp(frame.centroid * 0.45 + value * 0.22, 0, 0.62))
+		bar.BackgroundTransparency = math.clamp(0.42 - value * 0.18, 0.12, 0.5)
+		bar.BackgroundColor3 = palette.Cyan:Lerp(palette.CyanSoft, math.clamp(frame.centroid * 0.45 + value * 0.2, 0, 0.62))
 	end
+end
+
+local function cycleVisualStyle()
+	local resonance = context.ResonanceController
+	local currentStyle = resonance:GetStyle()
+	local styles = Constants.VISUAL_STYLES :: { string }
+	local nextIndex = 1
+	for index, styleName in ipairs(styles) do
+		if styleName == currentStyle then
+			nextIndex = if index >= #styles then 1 else index + 1
+			break
+		end
+	end
+
+	resonance:SetStyle(styles[nextIndex] :: VisualStyle)
+end
+
+local function cycleCameraMode()
+	local camera = context.CameraController
+	local currentMode = camera:GetMode()
+	local nextIndex = 1
+	for index, cameraMode in ipairs(CAMERA_MODES) do
+		if cameraMode == currentMode then
+			nextIndex = if index >= #CAMERA_MODES then 1 else index + 1
+			break
+		end
+	end
+
+	camera:SetMode(CAMERA_MODES[nextIndex])
+end
+
+local function updateCameraMode(nextMode: CameraMode)
+	context.CameraController:SetMode(nextMode)
 end
 
 local function updateSelections()
 	local audio = context.AudioController
 	local resonance = context.ResonanceController
+	local camera = context.CameraController
 	local audioMode = audio:GetMode()
 	local visualStyle = resonance:GetStyle()
+	local cameraMode = camera:GetMode()
 
 	for name, button in pairs(audioButtons) do
 		local selected = false
@@ -266,6 +357,14 @@ local function updateSelections()
 	for name, button in pairs(visualButtons) do
 		setButtonSelected(button, name == visualStyle)
 	end
+
+	for name, button in pairs(cameraButtons) do
+		setButtonSelected(button, name == cameraMode)
+	end
+
+	setButtonSelected(tuneButton, isTuneOpen)
+	setText(currentModeButton, visualStyle)
+	setText(compactCameraButton, cameraMode)
 end
 
 local function updateReadouts()
@@ -309,10 +408,14 @@ local function bindStaticUi()
 	local gui = expectChild(playerGui, "ArrayWaveGui", "ScreenGui") :: ScreenGui
 	local pill = expectChild(gui, "NowPlayingPill", "Frame") :: Frame
 	local dockFrame = expectChild(gui, "BottomControlDock", "Frame") :: Frame
+	local collapsed = expectChild(dockFrame, "CollapsedControls", "Frame") :: Frame
+	local drawer = expectChild(dockFrame, "TuneDrawer", "Frame") :: Frame
 
 	screenGui = gui
 	nowPlayingPill = pill
 	bottomDock = dockFrame
+	collapsedControls = collapsed
+	tuneDrawer = drawer
 	pillStroke = pill:FindFirstChildOfClass("UIStroke")
 	dockStroke = dockFrame:FindFirstChildOfClass("UIStroke")
 	statusLabel = expectChild(pill, "StatusLabel", "TextLabel") :: TextLabel
@@ -323,26 +426,28 @@ local function bindStaticUi()
 	gui.ResetOnSpawn = false
 	songIdBox.Text = Constants.DEFAULT_AUDIO_ASSET_ID
 	songHighlight = 1
-	songHighlightUntil = os.clock() + 4.5
+	songHighlightUntil = os.clock() + 3.25
 
-	local analyzerFrame = expectChild(dockFrame, "AnalyzerStrip", "Frame") :: Frame
-	collectAnalyzerBars(analyzerFrame)
+	local compactPlayBase = findButton(collapsed, "CompactPlayBaseButton")
+	currentModeButton = findButton(collapsed, "CurrentModeButton")
+	tuneButton = findButton(collapsed, "TuneButton")
+	compactCameraButton = findButton(collapsed, "CompactCameraButton")
 
-	local transportRow = expectChild(dockFrame, "TransportRow", "Frame")
-	audioButtons.PlayBase = findButton(transportRow, "PlayBaseButton")
-	audioButtons.Demo = findButton(transportRow, "DemoButton")
-	audioButtons.Mic = findButton(transportRow, "MicButton")
-	audioButtons.PlayAsset = findButton(transportRow, "PlayAssetButton")
-	local stopButton = findButton(transportRow, "StopButton")
+	local sourceRow = expectChild(drawer, "SourceRow", "Frame")
+	audioButtons.PlayBase = findButton(sourceRow, "PlayBaseButton")
+	audioButtons.Demo = findButton(sourceRow, "DemoButton")
+	audioButtons.Mic = findButton(sourceRow, "MicButton")
+	audioButtons.PlayAsset = findButton(sourceRow, "PlayAssetButton")
+	local stopButton = findButton(sourceRow, "StopButton")
 
-	local visualModeRow = expectChild(dockFrame, "VisualModeRow", "Frame")
+	local visualModeRow = expectChild(drawer, "VisualModeRow", "Frame")
 	visualButtons.Grid = findButton(visualModeRow, "GridButton")
 	visualButtons.Row = findButton(visualModeRow, "RowButton")
 	visualButtons.Circle = findButton(visualModeRow, "CircleButton")
 	visualButtons.All = findButton(visualModeRow, "AllButton")
 	visualButtons.Minimal = findButton(visualModeRow, "MinimalButton")
 
-	local feelRow = expectChild(dockFrame, "FeelRow", "Frame")
+	local feelRow = expectChild(drawer, "FeelRow", "Frame")
 	local sensMinus = findButton(feelRow, "SensMinusButton")
 	sensValueLabel = expectChild(feelRow, "SensValueLabel", "TextLabel") :: TextLabel
 	local sensPlus = findButton(feelRow, "SensPlusButton")
@@ -353,16 +458,22 @@ local function bindStaticUi()
 	sprayValueLabel = expectChild(feelRow, "SprayValueLabel", "TextLabel") :: TextLabel
 	local sprayPlus = findButton(feelRow, "SprayPlusButton")
 
-	local actionRow = expectChild(dockFrame, "ActionRow", "Frame")
-	local pulseTest = findButton(actionRow, "PulseTestButton")
-	local resetView = findButton(actionRow, "ResetViewButton")
-	dropMarbleButton = findButton(actionRow, "DropMarbleButton")
+	local cameraActionRow = expectChild(drawer, "CameraActionRow", "Frame")
+	cameraButtons.Auto = findButton(cameraActionRow, "CameraAutoButton")
+	cameraButtons.Still = findButton(cameraActionRow, "CameraStillButton")
+	cameraButtons.Wide = findButton(cameraActionRow, "CameraWideButton")
+	cameraButtons.Close = findButton(cameraActionRow, "CameraCloseButton")
+	local pulseTest = findButton(cameraActionRow, "PulseTestButton")
+	dropMarbleButton = findButton(cameraActionRow, "DropMarbleButton")
 	dropMarbleButton.Visible = getMarbleRemote() ~= nil
+
+	local analyzerFrame = expectChild(drawer, "AnalyzerStrip", "Frame") :: Frame
+	collectAnalyzerBars(analyzerFrame)
 
 	maid:Give(songIdBox.Focused:Connect(function()
 		songIdFocused = true
 		songHighlight = 1
-		songHighlightUntil = os.clock() + 2.5
+		songHighlightUntil = os.clock() + 2.2
 		selectSongText()
 	end))
 	maid:Give(songIdBox.FocusLost:Connect(function(submitted: boolean)
@@ -373,12 +484,15 @@ local function bindStaticUi()
 		end
 	end))
 
-	bindButton(audioButtons.PlayBase, function()
+	local function playBase()
 		activeAudioButton = "PlayBase"
 		context.AudioController:PlayBaseSong()
 		clearStatusOverride()
 		updateReadouts()
-	end)
+	end
+
+	bindButton(compactPlayBase, playBase)
+	bindButton(audioButtons.PlayBase, playBase)
 	bindButton(audioButtons.Demo, function()
 		activeAudioButton = "Demo"
 		context.AudioController:SetMode("Demo")
@@ -402,10 +516,27 @@ local function bindStaticUi()
 		updateReadouts()
 	end)
 
+	bindButton(currentModeButton :: TextButton, function()
+		cycleVisualStyle()
+		updateReadouts()
+	end)
 	for styleName, button in pairs(visualButtons) do
 		local capturedStyle = styleName
 		bindButton(button, function()
 			context.ResonanceController:SetStyle(capturedStyle)
+			updateReadouts()
+		end)
+	end
+
+	bindButton(tuneButton :: TextButton, toggleTune)
+	bindButton(compactCameraButton :: TextButton, function()
+		cycleCameraMode()
+		updateReadouts()
+	end)
+	for cameraMode, button in pairs(cameraButtons) do
+		local capturedMode = cameraMode :: CameraMode
+		bindButton(button, function()
+			updateCameraMode(capturedMode)
 			updateReadouts()
 		end)
 	end
@@ -444,16 +575,13 @@ local function bindStaticUi()
 		context.ResonanceController:TriggerPulse(1)
 		glow = math.max(glow, 0.9)
 		songHighlight = math.max(songHighlight, 0.45)
-		showStatus("Pulse test")
-	end)
-	bindButton(resetView, function()
-		context.CameraController:Reset()
-		showStatus("View reset")
+		showStatus("Pulse")
 	end)
 	if dropMarbleButton ~= nil then
 		bindButton(dropMarbleButton, requestMarble)
 	end
 
+	setTuneOpen(Constants.UI_TUNE_DEFAULT_OPEN)
 	updateReadouts()
 end
 
@@ -487,27 +615,40 @@ function UIController:Start()
 
 	maid:Give(RunService.Heartbeat:Connect(function(deltaTime: number)
 		glow = NumberUtil.expSmooth(glow, 0, deltaTime, 6)
-		local highlightPulse = if os.clock() < songHighlightUntil then (math.sin(os.clock() * 5.2) + 1) * 0.32 + 0.5 else 0
+		local highlightPulse = if os.clock() < songHighlightUntil then (math.sin(os.clock() * 5.2) + 1) * 0.18 + 0.38 else 0
 		local targetHighlight = if songIdFocused then 1 else highlightPulse
 		songHighlight = NumberUtil.expSmooth(songHighlight, targetHighlight, deltaTime, 6)
 
 		local topStroke = pillStroke
 		if topStroke ~= nil then
-			topStroke.Transparency = 0.58 - math.clamp(songHighlight * 0.25, 0, 0.25)
+			topStroke.Transparency = 0.68 - math.clamp(songHighlight * 0.22, 0, 0.22)
 		end
 
 		local idStroke = songIdStroke
 		if idStroke ~= nil then
 			idStroke.Color = palette.CyanSoft
-			idStroke.Transparency = 0.62 - math.clamp(songHighlight * 0.54, 0, 0.54)
-			idStroke.Thickness = 1 + songHighlight * 0.8
+			idStroke.Transparency = 0.72 - math.clamp(songHighlight * 0.48, 0, 0.48)
+			idStroke.Thickness = 1 + songHighlight * 0.55
 		end
 
 		local stroke = dockStroke
 		if stroke ~= nil then
-			stroke.Transparency = 0.58 - math.clamp(glow * 0.24, 0, 0.24)
+			stroke.Transparency = 0.64 - math.clamp(glow * 0.22, 0, 0.22)
 		end
 	end))
+end
+
+function UIController:SetTuneOpen(open: boolean)
+	setTuneOpen(open)
+end
+
+function UIController:ToggleTune()
+	toggleTune()
+end
+
+function UIController:UpdateCameraMode(nextMode: CameraMode)
+	updateCameraMode(nextMode)
+	updateReadouts()
 end
 
 function UIController:SetStatus(text: string)
@@ -528,6 +669,8 @@ function UIController:Destroy()
 	screenGui = nil
 	nowPlayingPill = nil
 	bottomDock = nil
+	collapsedControls = nil
+	tuneDrawer = nil
 	statusLabel = nil
 	songIdBox = nil
 	dropMarbleButton = nil

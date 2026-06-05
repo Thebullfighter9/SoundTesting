@@ -4,18 +4,29 @@ Use Roblox Studio with Rojo connected to `default.project.json`.
 
 ## Studio Checklist
 
-- Start a play session and confirm the premium `ArrayWaveLoadingGui` appears immediately.
+- Start a play session and confirm `ArrayWaveLoadingGui` appears immediately.
 - Confirm the loading screen shows animated procedural bars or dots.
 - Confirm the loading screen fades out after the client is ready.
 - Confirm `ArrayWaveGui` appears in `PlayerGui`.
 - Confirm `ArrayWaveGui` is cloned from the static `StarterGui` asset and is not constructed by `UIController` at runtime.
+- Confirm the local avatar is hidden after spawn.
+- Confirm the local avatar remains hidden after respawn.
+- Confirm `Workspace.CurrentCamera.CameraType` is `Scriptable` while the visualizer is active.
+- Confirm camera mode starts as `Auto`.
+- Confirm the camera slowly orbits around the visualizer.
+- Confirm Auto, Still, Wide, and Close camera buttons change camera mode.
+- Confirm the camera frames Grid, Row, and Circle clearly.
 - Confirm `NowPlayingPill` appears at the top center.
+- Confirm `NowPlayingPill` is small and does not cover the field.
 - Confirm `SongIdBox` shows `9043887091`.
 - Confirm `SongIdBox` has a visible highlight on join.
 - Confirm focusing `SongIdBox` selects or highlights the ID for replacement.
 - Confirm `BottomControlDock` appears at the bottom center.
+- Confirm `BottomControlDock` starts collapsed.
+- Confirm `TuneButton` opens and closes `TuneDrawer`.
+- Confirm Sens, Motion, and Spray controls are hidden while collapsed and visible in `TuneDrawer`.
 - Confirm the old bottom-left panel is not present.
-- Confirm the UI does not show project keyboard-control text.
+- Confirm the UI does not show non-UI control text.
 - Confirm all UI buttons activate through `Activated`.
 - Use `Play Base` and confirm it attempts the base song.
 - If the base song cannot play, confirm Demo fallback starts with `Base song unavailable - using demo signal`.
@@ -33,6 +44,7 @@ Use Roblox Studio with Rojo connected to `default.project.json`.
 - Confirm Circle mode shows radial bars and faint expanding sound-wave rings.
 - Confirm All mode shows Grid, Row, and Circle together.
 - Confirm Minimal mode is restrained and clean.
+- Confirm default Grid mode uses cleaner, lower spray output than Pulse Test.
 - Confirm beat or transient events create a visible shockwave or ripple.
 - Use `Motion +` and confirm tile movement becomes stronger.
 - Use `Spray +` and confirm more light spray streaks activate on the next pulse.
@@ -46,7 +58,8 @@ Use Roblox Studio with Rojo connected to `default.project.json`.
 - Run a multi-client local server test and confirm each player has an independent marble limit.
 - Use the mobile emulator and confirm the compact UI remains usable.
 - Confirm mouse, touch, and gamepad selection can operate the UI.
-- Confirm project key input does not trigger audio, visualizer, marble, camera, or UI features.
+- Confirm non-UI input does not trigger audio, visualizer, marble, camera, or UI features.
+- Confirm the visualizer remains unobstructed during the first 5 seconds.
 - Confirm there are no per-frame remotes.
 - Confirm normal flow produces no Output errors.
 

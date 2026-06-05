@@ -2,6 +2,7 @@
 
 export type AudioMode = "Demo" | "Asset" | "Mic"
 export type VisualStyle = "Grid" | "Row" | "Circle" | "All" | "Minimal"
+export type CameraMode = "Auto" | "Still" | "Wide" | "Close"
 
 export type AudioFrame = {
 	rms: number,

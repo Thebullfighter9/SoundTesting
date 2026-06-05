@@ -558,17 +558,33 @@ local function activateAccentBurst(strength: number)
 	end
 end
 
-local function activateSprays(strength: number)
+local function activateSprays(strength: number, fullBurst: boolean)
 	if #lightSprays == 0 then
 		return
 	end
-	if sprayAmount <= 0 then
+	if sprayAmount <= 0 and not fullBurst then
 		return
 	end
 
-	local minimalScale = if style == "Minimal" then 0.35 else 1
-	local requestedCount = math.floor((12 + strength * 36) * sprayAmount * minimalScale)
-	local count = math.clamp(requestedCount, 4, Constants.LIGHT_SPRAY_POOL_SIZE)
+	local styleScale = 0.55
+	if style == "All" then
+		styleScale = Constants.ALL_MODE_SPRAY_MULTIPLIER
+	elseif style == "Minimal" then
+		styleScale = Constants.MINIMAL_MODE_SPRAY_MULTIPLIER
+	elseif style == "Row" then
+		styleScale = 0.42
+	elseif style == "Circle" then
+		styleScale = 0.62
+	end
+
+	local effectiveSpray = if fullBurst then math.max(sprayAmount, 1) else sprayAmount
+	local baseCount = if fullBurst then 26 + strength * 20 else 6 + strength * 20
+	local requestedCount = math.floor(baseCount * effectiveSpray * styleScale)
+	local count = math.clamp(requestedCount, if style == "Minimal" then 0 else 3, Constants.LIGHT_SPRAY_POOL_SIZE)
+	if count <= 0 then
+		return
+	end
+
 	for _ = 1, count do
 		local spray = lightSprays[sprayCursor]
 		sprayCursor += 1
@@ -577,31 +593,33 @@ local function activateSprays(strength: number)
 		end
 
 		local angle = random:NextNumber(0, math.pi * 2)
-		local radius = random:NextNumber(0.8, 5.4 + strength * 5.5)
 		local direction = Vector3.new(math.cos(angle), 0, math.sin(angle))
-		local upward = random:NextNumber(8.5, 15.5) * (0.75 + strength * 0.6)
-		local radialSpeed = random:NextNumber(15, 31) * (0.55 + strength * 0.8)
-		local start = visualCenter + direction * radius + Vector3.new(0, random:NextNumber(2.1, 4.2), 0)
+		local tangent = Vector3.new(-direction.Z, 0, direction.X)
+		local rimRadius = random:NextNumber(10.2, 14.8)
+		local upward = random:NextNumber(5.4, 10.2) * (0.76 + strength * 0.42)
+		local radialSpeed = random:NextNumber(9, 18) * (0.7 + strength * 0.58)
+		local sideSpeed = random:NextNumber(-2.8, 2.8)
+		local start = visualCenter + direction * rimRadius + Vector3.new(0, random:NextNumber(1.8, 3.4), 0)
 
 		spray.active = true
 		spray.position = start
-		spray.velocity = direction * radialSpeed + Vector3.new(0, upward, 0)
+		spray.velocity = direction * radialSpeed + tangent * sideSpeed + Vector3.new(0, upward, 0)
 		spray.life = 0
-		spray.maxLife = random:NextNumber(0.35, 0.85)
-		spray.size = random:NextNumber(0.72, 1.55) * (0.7 + strength * 0.5)
-		spray.spin = random:NextNumber(-3.5, 3.5)
+		spray.maxLife = random:NextNumber(0.25, 0.7)
+		spray.size = random:NextNumber(0.58, 1.18) * (0.82 + strength * 0.32)
+		spray.spin = random:NextNumber(-1.6, 1.6)
 		spray.colorWeight = random:NextNumber(0, 1)
 	end
 end
 
-local function activatePulse(strength: number)
+local function activatePulse(strength: number, fullSprayBurst: boolean?)
 	local cleanStrength = math.clamp(NumberUtil.sanitizeFiniteNumber(strength, 0.85), 0.1, 1)
 	pulseAge = 0
 	pulseStrength = math.max(pulseStrength, cleanStrength)
 	lastBeatStrength = cleanStrength
 
 	activateShockwave(cleanStrength)
-	activateSprays(cleanStrength)
+	activateSprays(cleanStrength, fullSprayBurst == true)
 	activateAccentBurst(cleanStrength)
 
 	for _, tile in ipairs(gridTiles) do
@@ -629,7 +647,7 @@ local function updateGrid(frame: AudioFrame, energy: number, deltaTime: number):
 		local diagonal = (math.sin(timeNow * 5.8 + (tile.row + tile.column) * 0.34) + 1) * 0.5 * frame.lowMid * 2.4
 		local midRipple = (math.sin(timeNow * 4.6 - tile.radius * 0.62 + tile.angle * 1.6) + 1) * 0.5 * frame.mid * 2.2
 		local beatRipple = math.max(0, 1 - math.abs(tile.radius - pulseAge * 45) / 4.4) * pulse * 4.8
-		local highShimmer = (math.sin(timeNow * 22 + tile.angle * 7 + index) + 1) * 0.5 * (frame.high + frame.air * 0.65) * tile.edgeWeight * edgeFocus
+		local highShimmer = (math.sin(timeNow * 16 + tile.angle * 6 + tile.radius * 0.72) + 1) * 0.5 * (frame.high + frame.air * 0.5) * tile.edgeWeight * edgeFocus * 0.72
 		local visibleFloor = Constants.MIN_VISIBLE_ENERGY * (0.7 + energy * 0.7)
 		local beatLift = math.max(frame.beatStrength, frame.transient * 1.35) * tile.centerWeight * Constants.GRID_BEAT_IMPULSE * 1.15
 		local targetY = visibleFloor + band ^ 0.9 * 2.25 + dome + diagonal + midRipple + beatRipple + beatLift + highShimmer
@@ -770,14 +788,14 @@ local function updateLightSprays(deltaTime: number)
 				activeSprayCount += 1
 				local ageAlpha = spray.life / spray.maxLife
 				local fade = 1 - ageAlpha
-				spray.velocity += Vector3.new(0, -14 * deltaTime, 0)
+				spray.velocity += Vector3.new(0, -10 * deltaTime, 0)
 				spray.position += spray.velocity * deltaTime
 				local velocityDirection = if spray.velocity.Magnitude > 0.001 then spray.velocity.Unit else Vector3.yAxis
-				local length = (0.7 + spray.velocity.Magnitude * 0.032) * spray.size
+				local length = (0.55 + spray.velocity.Magnitude * 0.026) * spray.size
 				local transparency = math.clamp(1 - fade * (0.78 + spray.colorWeight * 0.1), 0.08, 1)
 				local color = palette.Cyan:Lerp(palette.Text, 0.28 + spray.colorWeight * 0.48)
 
-				spray.part.Size = Vector3.new(0.055 * spray.size, 0.055 * spray.size, length)
+				spray.part.Size = Vector3.new(0.045 * spray.size, 0.045 * spray.size, length)
 				spray.part.CFrame = CFrame.lookAt(spray.position, spray.position + velocityDirection) * CFrame.Angles(0, 0, spray.spin * spray.life)
 				spray.part.Color = color
 				spray.part.Transparency = transparency
@@ -840,10 +858,10 @@ local function updateVisuals(deltaTime: number)
 
 	if frame.beat and frame.time - lastBeatTime > 0.08 then
 		lastBeatTime = frame.time
-		activatePulse(math.max(frame.beatStrength, frame.bass * 0.72, frame.spectralFlux * 0.9, 0.38))
+		activatePulse(math.max(frame.beatStrength, frame.bass * 0.72, frame.spectralFlux * 0.9, 0.38), false)
 	elseif frame.spectralFlux > 0.42 and frame.transient > 0.14 and frame.time - lastBeatTime > 0.22 then
 		lastBeatTime = frame.time
-		activatePulse(math.max(frame.spectralFlux * 0.85, frame.transient, 0.28))
+		activatePulse(math.max(frame.spectralFlux * 0.85, frame.transient, 0.28), false)
 	end
 
 	local gridJump = updateGrid(frame, energy, cleanDelta)
@@ -942,7 +960,7 @@ function ResonanceController:GetStyle(): VisualStyle
 end
 
 function ResonanceController:TriggerPulse(strength: number)
-	activatePulse(math.clamp(NumberUtil.sanitizeFiniteNumber(strength, 0.85), 0.1, 1))
+	activatePulse(math.clamp(NumberUtil.sanitizeFiniteNumber(strength, 0.85), 0.1, 1), true)
 end
 
 function ResonanceController:TriggerPulseTest()

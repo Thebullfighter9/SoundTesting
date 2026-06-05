@@ -24,9 +24,9 @@ Shared constants define the default base song, visual styles, palette, loading t
 
 ## StarterGui
 
-`ArrayWaveGui.model.json` defines the top-center `NowPlayingPill`, `SongIdBox`, bottom-center `BottomControlDock`, analyzer strip, and buttons as a static Rojo UI asset. Client code does not create the UI tree at runtime.
+`ArrayWaveGui.model.json` defines the top-center `NowPlayingPill`, `SongIdBox`, bottom-center `BottomControlDock`, collapsed controls, and `TuneDrawer` as a static Rojo UI asset. Client code does not create the UI tree at runtime.
 
-`NowPlayingPill` owns the current source/status readout and the highlighted song ID field. `BottomControlDock` owns transport, visual mode, Sensitivity, Motion, Spray, Pulse, View, and optional Marble controls.
+`NowPlayingPill` owns the current source/status readout and the highlighted song ID field. `BottomControlDock` starts collapsed with a few media-style controls. The `TuneDrawer` holds source, visual mode, Sensitivity, Motion, Spray, camera mode, Pulse, and optional Marble controls.
 
 ## Server
 
@@ -44,7 +44,7 @@ Client controllers own presentation and UI-only controls:
 
 - `AudioController` produces rich audio frames in Demo, Asset, or Mic mode.
 - `ResonanceController` creates and updates the local-only ArrayWave visualizer under `Workspace/ArrayWaveClientVisuals`.
-- `CameraController` frames the sculpture and applies subtle bass or beat-strength FOV feedback.
+- `CameraController` owns the scriptable orbit camera, camera mode switching, subtle audio-reactive FOV/distance changes, and local-only avatar hiding.
 - `UIController` binds behavior to the static `ArrayWaveGui` instances, owns all project controls, and sends optional marble requests.
 
 Visual child folders are:
@@ -63,6 +63,8 @@ Grid tiles keep per-tile spring state (`currentY`, `velocityY`, `currentHeight`,
 ## Audio Boundary
 
 Audio analysis is local presentation state. Spectrum, RMS, peak, beat, band values, microphone state, and asset loudness are not sent to the server.
+
+Camera mode, camera movement, local player hiding, and visualizer state are also client-only.
 
 The client only sends a marble request when the player uses the optional UI control. The payload contains optional cosmetic energy only.
 

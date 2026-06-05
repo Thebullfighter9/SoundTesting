@@ -34,7 +34,7 @@ The controller clamps values to `0..1` and uses `NumberUtil.sanitizeFiniteNumber
 
 Analyzer values can be small even when the audible track feels active. `AudioController` keeps rolling peak and RMS envelopes, derives a clamped `autoGain` between `1.0` and `MAX_VISUAL_GAIN`, and applies a curved response of `1 - exp(-value * 2.4)` before smoothing visual bands.
 
-This gain staging raises quiet tracks without letting loud tracks explode the scene. The final frame exposes normalized bands and `visualEnergy` for grid motion, camera pulse, UI meters, and pooled burst effects.
+This gain staging raises quiet tracks without letting loud tracks explode the scene. The final frame exposes normalized bands and `visualEnergy` for grid motion, camera movement/FOV, UI meters, and pooled burst effects.
 
 ## Modular Audio Path
 
@@ -78,4 +78,4 @@ Bass bands use heavier smoothing, while high and air bands respond faster.
 
 ## Privacy
 
-Raw audio samples, raw microphone data, spectrum arrays, RMS, peak, band values, loudness, and beat values are never saved and never sent to the server.
+Raw audio samples, raw microphone data, spectrum arrays, RMS, peak, band values, loudness, beat values, camera state, and visualizer state are never saved and never sent to the server.
