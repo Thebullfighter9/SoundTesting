@@ -1,43 +1,24 @@
 # Audio
 
-ArrayWave keeps audio analysis on the client. Audio frames are presentation data and are not replicated.
+Audio stays on the client. The server never receives spectrum arrays, loudness, mic input, bands, beats, or camera state.
 
-## Base Song
+## Default Asset
 
-The default base song is Roblox audio asset `9043887091`. `AudioController` tries it on startup, and the UI song field starts with the same ID.
+The base song is Roblox audio asset `9043887091`. `AudioController` tries to play it on startup and the static UI pre-fills the same ID.
 
-If the asset is blocked, private, unavailable, or the audio graph fails, the controller switches to Demo mode.
+## Truth Modes
 
-## Frame Data
+Each audio frame carries `analyzerTruthMode`:
 
-Each frame exposes RMS, peak, 96 normalized bands, bass, low-mid, mid, high, air, transient energy, spectral flux, beat strength, centroid, visual energy, and time.
+- `Spectrum`: `AudioAnalyzer:GetSpectrum()` returned enough shaped bins to treat the row as a real band display.
+- `LoudnessOnly`: the client has amplitude from analyzer levels or `Sound.PlaybackLoudness`, but no usable per-frequency spectrum.
+- `Demo`: the local demo signal is driving the sculpture.
+- `Silent`: no active signal is driving the sculpture.
 
-Analyzer and fallback values are sanitized with `NumberUtil.sanitizeFiniteNumber` and clamped to `0..1`.
+In `Spectrum` mode, Row bars follow real bands and `RowSpectrumCorrelation` is written for Studio checks. In `LoudnessOnly` mode, Row becomes a broad amplitude wave. It can still look clean, but it is not a frequency visualizer.
 
-## Normalization
+## Diagnostics
 
-Analyzer values are often small, so `AudioController` keeps rolling RMS, rolling peak, and per-band peak memory. It derives smooth auto-gain for the full signal and for each band, then uses a curved visual response:
+`AudioController:GetDiagnostics()` returns audio mode, truth mode, asset ID, spectrum bin count, spectrum variance, loudness, RMS, peak, and fallback reason.
 
-```lua
-visual = 1 - math.exp(-raw * gain * curve)
-```
-
-This raises quiet tracks without making loud tracks hit full motion all the time. A small visual floor is only applied when real energy is present, so silence still settles.
-
-## Band Mapping
-
-The visualizer samples bands with interpolation instead of integer-only indexing.
-
-Row bars use curved band placement, a secondary harmonic band, per-bar attack/release, spring motion, and peak caps.
-
-Grid tiles combine assigned bands with bass center motion, low-mid diagonal waves, mid sculpting, high/air edge shimmer, and pooled beat ripples.
-
-Circle bars combine direct bands, neighboring bands, centroid focus, beat pulses, and phase offsets so energy travels around the rim instead of pulsing all bars at once.
-
-## Demo Mode
-
-Demo mode creates kick-like bass pulses, snare-like mid hits, high-hat shimmer, slow groove movement, and 96 non-flat bands. It is meant to exercise Grid, Row, and Circle without depending on an available asset.
-
-## Network Boundary
-
-Raw audio, microphone data, spectrum arrays, RMS, peak, bands, beat values, camera state, and visualizer state are never sent to the server.
+Low-rate attributes are also written to `Workspace.ArrayWaveClientVisuals` when the visual root exists, and to a client-local `PlayerGui.ArrayWaveAudioDiagnostics` folder.

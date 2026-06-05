@@ -13,6 +13,8 @@ local Maid = require((Util:WaitForChild("Maid") :: ModuleScript))
 local NumberUtil = require((Util:WaitForChild("NumberUtil") :: ModuleScript))
 
 type AudioFrame = Types.AudioFrame
+type AnalyzerTruthMode = Types.AnalyzerTruthMode
+type AudioDiagnostics = Types.AudioDiagnostics
 type VisualStats = Types.VisualStats
 type VisualStyle = Types.VisualStyle
 
@@ -147,6 +149,7 @@ local attributeAccumulator = 0
 local rowHeightVariance = 0
 local rowMaxHeight = 0
 local rowActiveCaps = 0
+local rowSpectrumCorrelation = -1
 local gridHeightVariance = 0
 local circleLengthVariance = 0
 local circleActiveWaves = 0
@@ -180,6 +183,13 @@ local SAFE_FRAME: AudioFrame = {
 	visualEnergy = 0.25,
 	bands = {},
 	time = 0,
+	audioMode = "Demo",
+	analyzerTruthMode = "Demo",
+	usingRealSpectrum = false,
+	spectrumBinCount = 0,
+	spectrumVariance = 0,
+	loudness = 0.25,
+	fallbackReason = "Audio controller unavailable",
 }
 
 local function getRenderSignal(): RBXScriptSignal
@@ -696,17 +706,17 @@ local function getSafeFrame(): AudioFrame
 
 	local audioFrame = frame :: AudioFrame
 	local bands = audioFrame.bands
-	local hasUsefulBand = false
+	local hasBandTable = false
 	if typeof(bands) == "table" then
-		for index = 1, math.min(#bands, audioBandCount) do
-			if NumberUtil.sanitizeFiniteNumber(bands[index], 0) > 0.01 then
-				hasUsefulBand = true
-				break
-			end
-		end
+		hasBandTable = #bands > 0
 	end
 
 	local visualEnergy = clamp01(audioFrame.visualEnergy or math.max(audioFrame.rms, audioFrame.peak))
+	local truthMode: AnalyzerTruthMode = audioFrame.analyzerTruthMode
+	if truthMode ~= "Spectrum" and truthMode ~= "LoudnessOnly" and truthMode ~= "Demo" and truthMode ~= "Silent" then
+		truthMode = "Demo"
+	end
+
 	local cleanFrame: AudioFrame = {
 		rms = clamp01(audioFrame.rms),
 		peak = clamp01(audioFrame.peak),
@@ -721,15 +731,49 @@ local function getSafeFrame(): AudioFrame
 		spectralFlux = clamp01(audioFrame.spectralFlux),
 		centroid = clamp01(audioFrame.centroid),
 		visualEnergy = visualEnergy,
-		bands = if hasUsefulBand then bands else {},
+		bands = if hasBandTable then bands else {},
 		time = NumberUtil.sanitizeFiniteNumber(audioFrame.time, os.clock()),
+		audioMode = audioFrame.audioMode,
+		analyzerTruthMode = truthMode,
+		usingRealSpectrum = audioFrame.usingRealSpectrum == true,
+		spectrumBinCount = math.max(0, NumberUtil.sanitizeFiniteNumber(audioFrame.spectrumBinCount, 0)),
+		spectrumVariance = math.max(0, NumberUtil.sanitizeFiniteNumber(audioFrame.spectrumVariance, 0)),
+		loudness = clamp01(audioFrame.loudness),
+		fallbackReason = audioFrame.fallbackReason,
 	}
 
-	if not hasUsefulBand then
+	if not hasBandTable and cleanFrame.analyzerTruthMode == "Demo" then
 		cleanFrame.bands = synthesizeBands(cleanFrame)
+	elseif not hasBandTable then
+		cleanFrame.bands = {}
 	end
 
 	return cleanFrame
+end
+
+local function getAudioDiagnostics(frame: AudioFrame): AudioDiagnostics
+	local audio = context and context.AudioController
+	if audio ~= nil and typeof(audio.GetDiagnostics) == "function" then
+		local ok, diagnostics = pcall(function()
+			return audio:GetDiagnostics()
+		end)
+		if ok and typeof(diagnostics) == "table" then
+			return diagnostics :: AudioDiagnostics
+		end
+	end
+
+	return {
+		audioMode = frame.audioMode,
+		analyzerTruthMode = frame.analyzerTruthMode,
+		assetId = nil,
+		usingRealSpectrum = frame.usingRealSpectrum,
+		spectrumBinCount = frame.spectrumBinCount,
+		spectrumVariance = frame.spectrumVariance,
+		loudness = frame.loudness,
+		rms = frame.rms,
+		peak = frame.peak,
+		fallbackReason = frame.fallbackReason,
+	}
 end
 
 local function activateShockwave(strength: number)
@@ -909,13 +953,22 @@ local function getGridRippleValue(tile: GridTileState): number
 	return math.clamp(value, 0, 1.4)
 end
 
-local function updateGrid(frame: AudioFrame, character: FrequencyCharacter, energy: number, deltaTime: number): number
+local function updateGrid(
+	frame: AudioFrame,
+	character: FrequencyCharacter,
+	energy: number,
+	deltaTime: number,
+	diagnostics: AudioDiagnostics
+): number
 	local timeNow = frame.time
 	local minimal = style == "Minimal"
 	local visible = style == "Grid" or style == "All" or style == "Minimal"
 	local maxJump = 0
 	local sum = 0
 	local sumSquares = 0
+	local truthMode = diagnostics.analyzerTruthMode
+	local proceduralScale = if truthMode == "Spectrum" then 0.16 elseif truthMode == "LoudnessOnly" then 0.45 elseif truthMode == "Silent" then 0 else 1
+	local bandScale = if truthMode == "Spectrum" then 1.18 elseif truthMode == "LoudnessOnly" then 0.78 elseif truthMode == "Silent" then 0 else 1
 
 	for _, tile in ipairs(gridTiles) do
 		local directBand = getBandInterpolated(frame, tile.bandIndex)
@@ -925,17 +978,27 @@ local function updateGrid(frame: AudioFrame, character: FrequencyCharacter, ener
 		local edgeWeight = tile.normalizedRadius ^ 1.7
 		local bassDome = frame.bass ^ 1.2 * centerWeight * character.centerFocus * Constants.GRID_CENTER_BASS_GAIN
 		local diagonalPhase = (tile.normalizedX + tile.normalizedZ) * 4.4 + tile.phase
-		local diagonal = ((math.sin(timeNow * 2.65 + diagonalPhase) + 1) * 0.5) * character.bodyWeight * Constants.GRID_WAVE_GAIN * middleWeight
-		local bandWave = (directBand * 0.72 + secondaryBand * 0.28) ^ 0.72 * (1.0 + middleWeight * 0.65) * 2.85
+		local diagonal = ((math.sin(timeNow * 2.65 + diagonalPhase) + 1) * 0.5)
+			* character.bodyWeight
+			* Constants.GRID_WAVE_GAIN
+			* middleWeight
+			* proceduralScale
+		local bandWave = (directBand * 0.76 + secondaryBand * 0.24) ^ 0.72 * (1.0 + middleWeight * 0.65) * 2.85 * bandScale
 		local midSculpt = ((math.sin(timeNow * 2.1 - tile.radius * 0.48 + tile.angle * 1.8) + 1) * 0.5)
 			* character.presenceWeight
 			* middleWeight
 			* 2.15
+			* proceduralScale
 		local ripple = getGridRippleValue(tile)
 		local beatRipple = ripple * (2.4 + character.beatAccent * 2.1) * (0.58 + centerWeight * 0.42)
 		local shimmerPhase = math.sin(timeNow * 12.5 + tile.angle * 5.5 + tile.radius * 0.66 + tile.phase)
-		local edgeShimmer = (shimmerPhase + 1) * 0.5 * character.shimmerWeight * edgeWeight * character.edgeFocus * Constants.GRID_EDGE_HIGH_GAIN
-		local visibleFloor = Constants.MIN_VISIBLE_ENERGY * (0.28 + energy * 0.55)
+		local edgeShimmer = (shimmerPhase + 1) * 0.5
+			* character.shimmerWeight
+			* edgeWeight
+			* character.edgeFocus
+			* Constants.GRID_EDGE_HIGH_GAIN
+			* proceduralScale
+		local visibleFloor = if truthMode == "Silent" then 0 else Constants.MIN_VISIBLE_ENERGY * (0.28 + energy * 0.55)
 		local targetY = visibleFloor + bassDome + diagonal + bandWave + midSculpt + beatRipple + edgeShimmer
 		targetY *= motion * tile.motionBias
 		if minimal then
@@ -986,34 +1049,79 @@ local function updateGrid(frame: AudioFrame, character: FrequencyCharacter, ener
 	return maxJump
 end
 
-local function updateRow(frame: AudioFrame, character: FrequencyCharacter, energy: number, deltaTime: number)
+local function updateRow(
+	frame: AudioFrame,
+	character: FrequencyCharacter,
+	energy: number,
+	deltaTime: number,
+	diagnostics: AudioDiagnostics
+)
 	local visible = style == "Row" or style == "All"
 	local sum = 0
 	local sumSquares = 0
+	local correlationSamples = 0
+	local directSum = 0
+	local targetSum = 0
+	local directSquares = 0
+	local targetSquares = 0
+	local directTarget = 0
+	local truthMode = diagnostics.analyzerTruthMode
 	rowMaxHeight = 0
 	rowActiveCaps = 0
 
 	for _, rowBar in ipairs(rowBars) do
 		local alpha = rowBar.frequencyBias
 		local direct = getBandInterpolated(frame, rowBar.bandIndex)
-		local neighborOffset = math.sin(rowBar.phase + frame.time * 0.2) * 0.014
+		local neighborOffset = if truthMode == "Spectrum" then 0.006 else math.sin(rowBar.phase + frame.time * 0.2) * 0.014
 		local neighbor = getBandInterpolated(frame, math.clamp(rowBar.bandIndex + neighborOffset, 0, 1))
 		local harmonic = getBandInterpolated(frame, rowBar.secondaryBandIndex)
 		local lowWeight = math.max(0, 1 - alpha * 3.2)
 		local bodyWeight = math.max(0, 1 - math.abs(alpha - 0.28) * 3.4)
 		local presenceWeight = math.max(0, 1 - math.abs(alpha - 0.55) * 2.8)
 		local shimmerWeight = alpha ^ 1.55
-		local phaseWave = (math.sin(frame.time * 3.2 - alpha * math.pi * 3.2 + rowBar.phase) + 1) * 0.5
-		local waveLag = phaseWave * character.bodyWeight * 0.22
-		local region = frame.bass * lowWeight * 0.46
-			+ frame.lowMid * bodyWeight * 0.36
-			+ frame.mid * presenceWeight * 0.42
-			+ frame.high * shimmerWeight * 0.28
-		local accent = character.fluxAccent * (0.12 + shimmerWeight * 0.18) + character.beatAccent * lowWeight * 0.2
-		local power = math.clamp(direct * 0.62 + neighbor * 0.16 + harmonic * 0.13 + region + waveLag + accent + energy * 0.05, 0, 1.4)
+		local accent = character.fluxAccent * (0.08 + shimmerWeight * 0.1) + character.beatAccent * lowWeight * 0.12
+		local power = 0
+
+		if truthMode == "Spectrum" then
+			local region = frame.bass * lowWeight * 0.08
+				+ frame.lowMid * bodyWeight * 0.05
+				+ frame.mid * presenceWeight * 0.05
+				+ frame.high * shimmerWeight * 0.04
+			power = math.clamp(direct * 0.84 + neighbor * 0.08 + harmonic * 0.04 + region + accent * 0.45, 0, 1.35)
+		elseif truthMode == "LoudnessOnly" then
+			local loudness = math.clamp(math.max(diagnostics.loudness, frame.rms, frame.peak * 0.72, frame.visualEnergy * 0.78), 0, 1)
+			local centerWeight = 1 - math.abs(alpha - 0.5) * 2
+			local amplitudeWave = (math.sin(frame.time * 2.4 + alpha * math.pi * 2.0 + rowBar.phase * 0.18) + 1) * 0.5
+			local silhouette = 0.2 + centerWeight * 0.58 + amplitudeWave * 0.14
+			direct = loudness * silhouette
+			power = math.clamp(direct + character.beatAccent * (0.04 + centerWeight * 0.1), 0, 1.2)
+		elseif truthMode == "Silent" then
+			direct = 0
+			power = 0
+			accent = 0
+		else
+			local phaseWave = (math.sin(frame.time * 3.2 - alpha * math.pi * 3.2 + rowBar.phase) + 1) * 0.5
+			local waveLag = phaseWave * character.bodyWeight * 0.22
+			local region = frame.bass * lowWeight * 0.46
+				+ frame.lowMid * bodyWeight * 0.36
+				+ frame.mid * presenceWeight * 0.42
+				+ frame.high * shimmerWeight * 0.28
+			accent = character.fluxAccent * (0.12 + shimmerWeight * 0.18) + character.beatAccent * lowWeight * 0.2
+			power = math.clamp(direct * 0.62 + neighbor * 0.16 + harmonic * 0.13 + region + waveLag + accent + energy * 0.05, 0, 1.4)
+		end
+
 		local curved = 1 - math.exp(-power * Constants.ROW_HEIGHT_CURVE)
 		local heightTarget = Constants.ROW_MIN_HEIGHT + curved * (Constants.ROW_MAX_HEIGHT - Constants.ROW_MIN_HEIGHT) * 0.82 * motion
 		heightTarget = math.clamp(heightTarget, Constants.ROW_MIN_HEIGHT, Constants.ROW_MAX_HEIGHT)
+		if truthMode == "Spectrum" then
+			local normalizedTarget = math.clamp((heightTarget - Constants.ROW_MIN_HEIGHT) / math.max(0.001, Constants.ROW_MAX_HEIGHT - Constants.ROW_MIN_HEIGHT), 0, 1)
+			directSum += direct
+			targetSum += normalizedTarget
+			directSquares += direct * direct
+			targetSquares += normalizedTarget * normalizedTarget
+			directTarget += direct * normalizedTarget
+			correlationSamples += 1
+		end
 
 		local targetSpeed = if heightTarget > rowBar.target then rowBar.attack else rowBar.release
 		rowBar.target = NumberUtil.expSmooth(rowBar.target, heightTarget, deltaTime, targetSpeed)
@@ -1059,9 +1167,25 @@ local function updateRow(frame: AudioFrame, character: FrequencyCharacter, energ
 	end
 
 	rowHeightVariance = computeVariance(sum, sumSquares, #rowBars)
+	if truthMode == "Spectrum" and correlationSamples > 2 then
+		local sampleCount = correlationSamples
+		local covariance = directTarget - directSum * targetSum / sampleCount
+		local directVariance = directSquares - directSum * directSum / sampleCount
+		local targetVariance = targetSquares - targetSum * targetSum / sampleCount
+		local denominator = math.sqrt(math.max(0, directVariance) * math.max(0, targetVariance))
+		rowSpectrumCorrelation = if denominator > 0.000001 then math.clamp(covariance / denominator, -1, 1) else 0
+	else
+		rowSpectrumCorrelation = -1
+	end
 end
 
-local function updateCircle(frame: AudioFrame, character: FrequencyCharacter, energy: number, deltaTime: number)
+local function updateCircle(
+	frame: AudioFrame,
+	character: FrequencyCharacter,
+	energy: number,
+	deltaTime: number,
+	diagnostics: AudioDiagnostics
+)
 	local visible = style == "Circle" or style == "All" or style == "Minimal"
 	local minimal = style == "Minimal"
 	local sum = 0
@@ -1069,6 +1193,9 @@ local function updateCircle(frame: AudioFrame, character: FrequencyCharacter, en
 	local pulse = math.clamp(1 - pulseAge / 0.58, 0, 1) * pulseStrength
 	local bassRadius = frame.bass * 2.4 + pulse * 1.7
 	local centroidPush = frame.centroid * 1.45
+	local truthMode = diagnostics.analyzerTruthMode
+	local proceduralScale = if truthMode == "Spectrum" then 0.18 elseif truthMode == "LoudnessOnly" then 0.52 elseif truthMode == "Silent" then 0 else 1
+	local bandScale = if truthMode == "Spectrum" then 1.16 elseif truthMode == "LoudnessOnly" then 0.82 elseif truthMode == "Silent" then 0 else 1
 
 	for _, circleBar in ipairs(circleBars) do
 		local alpha = circleBar.frequencyBias
@@ -1079,13 +1206,11 @@ local function updateCircle(frame: AudioFrame, character: FrequencyCharacter, en
 		local harmonic = getBandInterpolated(frame, circleBar.secondaryBandIndex)
 		local traveling = (math.sin(frame.time * (3.2 + Constants.CIRCLE_TRAVEL_SPEED) + circleBar.phase * 2.2) + 1) * 0.5
 		local beatPhase = math.max(0, math.sin(pulseAge * 10 - circleBar.phase * 1.4)) * pulse
-		local centroidInfluence = lerp(character.centerFocus * 0.28, character.edgeFocus * 0.44, alpha)
-		local highTip = (frame.high * 0.72 + frame.air * 0.58) * (0.36 + traveling * 0.64)
+		local centroidInfluence = lerp(character.centerFocus * 0.28, character.edgeFocus * 0.44, alpha) * proceduralScale
+		local highTip = (frame.high * 0.72 + frame.air * 0.58) * (0.36 + traveling * 0.64 * proceduralScale)
 		local power = math.clamp(
-			direct * 0.56
-				+ neighbor * 0.18
-				+ harmonic * 0.12
-				+ frame.mid * 0.22
+			(direct * 0.64 + neighbor * 0.14 + harmonic * 0.08) * bandScale
+				+ frame.mid * 0.22 * proceduralScale
 				+ highTip * 0.34
 				+ centroidInfluence
 				+ beatPhase * 0.32
@@ -1106,7 +1231,7 @@ local function updateCircle(frame: AudioFrame, character: FrequencyCharacter, en
 		circleBar.glow = NumberUtil.expSmooth(circleBar.glow, math.clamp(highTip * 0.72 + beatPhase * 0.5 + direct * 0.2, 0, 1), deltaTime, 9)
 
 		local radius = 12.4 + bassRadius + centroidPush + circleBar.current * 0.44
-		local yLift = 2.52 + frame.lowMid * 0.86 + pulse * 0.52 + traveling * frame.mid * 0.2
+		local yLift = 2.52 + frame.lowMid * 0.86 + pulse * 0.52 + traveling * frame.mid * 0.2 * proceduralScale
 		local position = visualCenter + Vector3.new(0, yLift, 0) + direction * radius
 		local tipWidth = 0.14 + highTip * 0.08
 		circleBar.part.Size = Vector3.new(tipWidth, 0.36 + highTip * 0.34, 1.0 + circleBar.current)
@@ -1233,7 +1358,7 @@ local function updateAccentLights(frame: AudioFrame, character: FrequencyCharact
 	end
 end
 
-local function updateAttributes(deltaTime: number)
+local function updateAttributes(deltaTime: number, diagnostics: AudioDiagnostics)
 	attributeAccumulator += deltaTime
 	if attributeAccumulator < 0.25 then
 		return
@@ -1251,6 +1376,7 @@ local function updateAttributes(deltaTime: number)
 	root:SetAttribute("RowHeightVariance", rowHeightVariance)
 	root:SetAttribute("RowMaxHeight", rowMaxHeight)
 	root:SetAttribute("RowActiveCaps", rowActiveCaps)
+	root:SetAttribute("RowSpectrumCorrelation", rowSpectrumCorrelation)
 	root:SetAttribute("GridHeightVariance", gridHeightVariance)
 	root:SetAttribute("GridMaxJump", maxRecentGridJump)
 	root:SetAttribute("GridRippleCount", activeRippleCount)
@@ -1260,10 +1386,17 @@ local function updateAttributes(deltaTime: number)
 	root:SetAttribute("ActiveShockwaves", activeShockwaveCount)
 	root:SetAttribute("MaxRecentGridJump", maxRecentGridJump)
 	root:SetAttribute("LastBeatStrength", lastBeatStrength)
+	root:SetAttribute("AnalyzerTruthMode", diagnostics.analyzerTruthMode)
+	root:SetAttribute("UsingRealSpectrum", diagnostics.usingRealSpectrum)
+	root:SetAttribute("SpectrumBinCount", diagnostics.spectrumBinCount)
+	root:SetAttribute("SpectrumVariance", diagnostics.spectrumVariance)
+	root:SetAttribute("CurrentAssetId", diagnostics.assetId)
+	root:SetAttribute("AudioFallbackReason", diagnostics.fallbackReason)
 end
 
 local function updateVisuals(deltaTime: number)
 	local frame = getSafeFrame()
+	local diagnostics = getAudioDiagnostics(frame)
 	local cleanDelta = math.clamp(NumberUtil.sanitizeFiniteNumber(deltaTime, 1 / 60), 1 / 240, 0.2)
 	local character = computeFrequencyCharacter(frame)
 	local energy = math.clamp((frame.visualEnergy * 0.38 + frame.rms * 0.18 + frame.peak * 0.16 + frame.bass * 0.2 + frame.mid * 0.12 + frame.high * 0.1) * motion, 0, 1)
@@ -1280,15 +1413,15 @@ local function updateVisuals(deltaTime: number)
 	end
 
 	updateGridRipples(cleanDelta)
-	local gridJump = updateGrid(frame, character, energy, cleanDelta)
+	local gridJump = updateGrid(frame, character, energy, cleanDelta, diagnostics)
 	maxRecentGridJump = math.max(maxRecentGridJump, gridJump)
-	updateRow(frame, character, energy, cleanDelta)
-	updateCircle(frame, character, energy, cleanDelta)
+	updateRow(frame, character, energy, cleanDelta, diagnostics)
+	updateCircle(frame, character, energy, cleanDelta, diagnostics)
 	updatePersistentWaveRings(frame, character)
 	updateShockwaves(cleanDelta)
 	updateLightSprays(cleanDelta)
 	updateAccentLights(frame, character, cleanDelta)
-	updateAttributes(cleanDelta)
+	updateAttributes(cleanDelta, diagnostics)
 
 	local camera = context and context.CameraController
 	if camera ~= nil and typeof(camera.Update) == "function" then
@@ -1394,7 +1527,9 @@ function ResonanceController:TriggerPulseTest()
 	self:TriggerPulse(1)
 end
 
-function ResonanceController:GetCurrentVisualStats(): VisualStats & { [string]: number }
+function ResonanceController:GetCurrentVisualStats(): VisualStats & { [string]: any }
+	local frame = getSafeFrame()
+	local diagnostics = getAudioDiagnostics(frame)
 	return {
 		gridParts = #gridTiles,
 		rowBars = #rowBars,
@@ -1403,10 +1538,20 @@ function ResonanceController:GetCurrentVisualStats(): VisualStats & { [string]: 
 		circleLengthVariance = circleLengthVariance,
 		gridHeightVariance = gridHeightVariance,
 		rowActiveCaps = rowActiveCaps,
+		rowSpectrumCorrelation = rowSpectrumCorrelation,
 		activeSprays = activeSprayCount,
 		activeShockwaves = activeShockwaveCount,
 		maxRecentGridJump = maxRecentGridJump,
 		lastBeatStrength = lastBeatStrength,
+		analyzerTruthMode = diagnostics.analyzerTruthMode,
+		usingRealSpectrum = diagnostics.usingRealSpectrum,
+		spectrumBinCount = diagnostics.spectrumBinCount,
+		spectrumVariance = diagnostics.spectrumVariance,
+		AnalyzerTruthMode = diagnostics.analyzerTruthMode,
+		UsingRealSpectrum = diagnostics.usingRealSpectrum,
+		SpectrumBinCount = diagnostics.spectrumBinCount,
+		SpectrumVariance = diagnostics.spectrumVariance,
+		RowSpectrumCorrelation = rowSpectrumCorrelation,
 		RowMaxHeight = rowMaxHeight,
 		GridRippleCount = activeRippleCount,
 		CircleActiveWaves = circleActiveWaves,
@@ -1418,7 +1563,7 @@ function ResonanceController:GetCurrentVisualStats(): VisualStats & { [string]: 
 	}
 end
 
-function ResonanceController:GetDebugCounts(): { [string]: number }
+function ResonanceController:GetDebugCounts(): { [string]: any }
 	return self:GetCurrentVisualStats()
 end
 

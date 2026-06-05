@@ -1,18 +1,16 @@
-# SoundTesting: ArrayWave
+# SoundTesting: Resonance Field
 
-ArrayWave is a Roblox audio visualizer built from Luau, anchored parts, and a local audio analyzer.
+A Roblox Luau audio visualizer built as a small kinetic sculpture.
 
-It starts with audio asset `9043887091`. Click the song ID at the top of the screen to replace it, then use Asset to try the new ID. If Roblox cannot play or analyze the asset in the place, the client falls back to a local demo signal.
+The default audio asset is `9043887091`. The client tries to read real spectrum data from Roblox's audio analyzer. When Roblox only exposes loudness, the project says so and uses a broad amplitude wave instead of pretending it has per-frequency data. Demo mode is separate and labeled as Demo.
 
-The visualizer has three main shapes:
+The piece has three main views:
 
-- Grid tiles use spring motion, bass domes, diagonal waves, and beat ripples.
-- Row bars act like an equalizer, with each bar mapped to its own band response and peak cap.
-- Circle bars radiate around the field with traveling sound-wave motion.
+- Grid: a field of local parts that rises from band or amplitude energy.
+- Row: the clearest readout. In Spectrum mode each bar follows a band; in Loudness mode the row becomes an amplitude wave.
+- Circle: a radial version of the same signal with restrained motion.
 
-Tune opens the extra controls. The collapsed UI only keeps the small media controls visible: Base, Demo, the current view, and Tune.
-
-All controls are UI-only. There are no project keybinds. Audio analysis, spectrum bands, camera state, and visualizer state stay on the client.
+The UI is intentionally small: base song, demo, current view, tune, and the song ID field. There are no keybinds, rounds, quests, NPCs, or simulator panels.
 
 ## Running
 

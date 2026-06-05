@@ -1,6 +1,7 @@
 --!strict
 
 export type AudioMode = "Demo" | "Asset" | "Mic"
+export type AnalyzerTruthMode = "Spectrum" | "LoudnessOnly" | "Demo" | "Silent"
 export type VisualStyle = "Grid" | "Row" | "Circle" | "All" | "Minimal"
 export type CameraMode = "Auto" | "Still" | "Wide" | "Close"
 
@@ -20,6 +21,26 @@ export type AudioFrame = {
 	visualEnergy: number,
 	bands: { number },
 	time: number,
+	audioMode: AudioMode,
+	analyzerTruthMode: AnalyzerTruthMode,
+	usingRealSpectrum: boolean,
+	spectrumBinCount: number,
+	spectrumVariance: number,
+	loudness: number,
+	fallbackReason: string?,
+}
+
+export type AudioDiagnostics = {
+	audioMode: AudioMode,
+	analyzerTruthMode: AnalyzerTruthMode,
+	assetId: string?,
+	usingRealSpectrum: boolean,
+	spectrumBinCount: number,
+	spectrumVariance: number,
+	loudness: number,
+	rms: number,
+	peak: number,
+	fallbackReason: string?,
 }
 
 export type VisualStats = {
@@ -33,6 +54,11 @@ export type VisualStats = {
 	activeShockwaves: number,
 	maxRecentGridJump: number,
 	lastBeatStrength: number,
+	rowSpectrumCorrelation: number,
+	analyzerTruthMode: AnalyzerTruthMode,
+	usingRealSpectrum: boolean,
+	spectrumBinCount: number,
+	spectrumVariance: number,
 }
 
 export type MarblePayload = {

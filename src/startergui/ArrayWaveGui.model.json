@@ -17,7 +17,7 @@
         "BackgroundTransparency": 0.2,
         "BorderSizePixel": 0,
         "Position": { "UDim2": [[0.5, 0], [0, 10]] },
-        "Size": { "UDim2": [[0, 280], [0, 34]] }
+        "Size": { "UDim2": [[0, 348], [0, 34]] }
       },
       "Children": [
         { "Name": "PillCorner", "ClassName": "UICorner", "Properties": { "CornerRadius": { "UDim": [0, 12] } } },
@@ -73,6 +73,22 @@
             "Size": { "UDim2": [[0, 62], [1, 0]] },
             "Text": "Base",
             "TextColor3": [0.4627450980392157, 0.9098039215686274, 1],
+            "TextScaled": true,
+            "TextTruncate": "AtEnd",
+            "TextXAlignment": "Left"
+          },
+          "Children": [{ "Name": "TextSize", "ClassName": "UITextSizeConstraint", "Properties": { "MaxTextSize": 10, "MinTextSize": 7 } }]
+        },
+        {
+          "Name": "AnalyzerStatusLabel",
+          "ClassName": "TextLabel",
+          "Properties": {
+            "BackgroundTransparency": 1,
+            "Font": "GothamMedium",
+            "LayoutOrder": 4,
+            "Size": { "UDim2": [[0, 62], [1, 0]] },
+            "Text": "Silent",
+            "TextColor3": [0.5333333333333333, 0.5882352941176471, 0.6352941176470588],
             "TextScaled": true,
             "TextTruncate": "AtEnd",
             "TextXAlignment": "Left"

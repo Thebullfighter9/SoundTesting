@@ -3,6 +3,7 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
+local Workspace = game:GetService("Workspace")
 
 local LocalPlayer = Players.LocalPlayer
 local Shared = ReplicatedStorage:WaitForChild("Shared")
@@ -15,6 +16,8 @@ local NumberUtil = require((Util:WaitForChild("NumberUtil") :: ModuleScript))
 
 type AudioFrame = Types.AudioFrame
 type AudioMode = Types.AudioMode
+type AnalyzerTruthMode = Types.AnalyzerTruthMode
+type AudioDiagnostics = Types.AudioDiagnostics
 
 local AudioController = {}
 
@@ -39,6 +42,17 @@ local audioAttemptSerial = 0
 local assetAnalyzer: AudioAnalyzer? = nil
 local micAnalyzer: AudioAnalyzer? = nil
 local classicSound: Sound? = nil
+local stopped = false
+local currentAssetId: string? = Constants.DEFAULT_AUDIO_ASSET_ID
+local analyzerTruthMode: AnalyzerTruthMode = "Silent"
+local usingRealSpectrum = false
+local spectrumBinCount = 0
+local spectrumVariance = 0
+local currentLoudness = 0
+local fallbackReason: string? = nil
+local demoReason = "Synthetic demo signal"
+local diagnosticAccumulator = 0
+local diagnosticFolder: Folder? = nil
 
 local bandCount = Constants.AUDIO_BAND_COUNT or Constants.VISUAL_BAND_COUNT
 local smoothedBands: { number } = table.create(bandCount, 0)
@@ -61,6 +75,13 @@ local currentFrame: AudioFrame = {
 	visualEnergy = 0,
 	bands = smoothedBands,
 	time = 0,
+	audioMode = mode,
+	analyzerTruthMode = analyzerTruthMode,
+	usingRealSpectrum = usingRealSpectrum,
+	spectrumBinCount = spectrumBinCount,
+	spectrumVariance = spectrumVariance,
+	loudness = currentLoudness,
+	fallbackReason = fallbackReason,
 }
 
 local function getRenderSignal(): RBXScriptSignal
@@ -205,21 +226,46 @@ local function createWire(parent: Instance, source: Instance, target: Instance):
 	end)
 end
 
-local function resampleSpectrum(spectrum: { any }, rms: number, peak: number, timeNow: number): { number }
+local function sanitizeSpectrumValue(value: any): number
+	local clean = NumberUtil.sanitizeFiniteNumber(value, 0)
+	if clean < 0 then
+		clean = math.abs(clean)
+	end
+	if clean > 1 then
+		clean /= 100
+	end
+
+	return math.clamp(clean, 0, 1)
+end
+
+local function computeSpectrumStats(spectrum: { [number]: any }): (number, number, boolean)
+	local total = 0
+	local totalSquares = 0
+	local count = 0
+	local maximum = 0
+
+	for _, value in ipairs(spectrum) do
+		local clean = sanitizeSpectrumValue(value)
+		total += clean
+		totalSquares += clean * clean
+		maximum = math.max(maximum, clean)
+		count += 1
+	end
+
+	if count <= 0 then
+		return 0, 0, false
+	end
+
+	local mean = total / count
+	local variance = math.max(0, totalSquares / count - mean * mean)
+	local enoughBins = count >= (Constants.SPECTRUM_MIN_VALID_BINS or 8)
+	local hasShape = variance >= (Constants.SPECTRUM_MIN_VARIANCE or 0.000001)
+	return count, variance, enoughBins and hasShape and maximum > 0.000001
+end
+
+local function resampleSpectrum(spectrum: { [number]: any }): { number }
 	local bands = table.create(bandCount, 0)
 	local sourceCount = #spectrum
-
-	if sourceCount == 0 then
-		local energy = math.max(rms, peak * 0.78, 0.05)
-		for index = 1, bandCount do
-			local alpha = (index - 1) / math.max(1, bandCount - 1)
-			local slow = (math.sin(timeNow * 2.4 + alpha * math.pi * 4.8) + 1) * 0.5
-			local highPulse = (math.sin(timeNow * 12.5 + alpha * math.pi * 22) + 1) * 0.5
-			local bassShape = math.max(0, 1 - alpha * 3.2)
-			bands[index] = clamp01(energy * (0.22 + slow * 0.28 + highPulse * alpha * 0.16 + bassShape * 0.42))
-		end
-		return bands
-	end
 
 	for bandIndex = 1, bandCount do
 		local startAlpha = ((bandIndex - 1) / bandCount) ^ 1.42
@@ -230,14 +276,7 @@ local function resampleSpectrum(spectrum: { any }, rms: number, peak: number, ti
 		local samples = 0
 
 		for spectrumIndex = startIndex, endIndex do
-			local value = NumberUtil.sanitizeFiniteNumber(spectrum[spectrumIndex], 0)
-			if value < 0 then
-				value = math.abs(value)
-			end
-			if value > 1 then
-				value /= 100
-			end
-			total += math.clamp(value, 0, 1)
+			total += sanitizeSpectrumValue(spectrum[spectrumIndex])
 			samples += 1
 		end
 
@@ -245,6 +284,83 @@ local function resampleSpectrum(spectrum: { any }, rms: number, peak: number, ti
 	end
 
 	return bands
+end
+
+local function buildLoudnessBands(loudness: number, timeNow: number): { number }
+	local bands = table.create(bandCount, 0)
+	local energy = clamp01(loudness)
+	local slowPhase = math.sin(timeNow * 2.1) * 0.18
+
+	for index = 1, bandCount do
+		local alpha = (index - 1) / math.max(1, bandCount - 1)
+		local centered = 1 - math.abs(alpha - 0.5) * 2
+		local wave = (math.sin(alpha * math.pi * 2.0 + slowPhase) + 1) * 0.5
+		local silhouette = 0.22 + centered * 0.62 + wave * 0.16
+		bands[index] = clamp01(energy * silhouette)
+	end
+
+	return bands
+end
+
+local function buildSilentBands(): { number }
+	local bands = table.create(bandCount, 0)
+	for index = 1, bandCount do
+		bands[index] = 0
+	end
+	return bands
+end
+
+local function getDiagnosticFolder(): Folder?
+	local folder = diagnosticFolder
+	if folder ~= nil and folder.Parent ~= nil then
+		return folder
+	end
+
+	local playerGui = LocalPlayer:FindFirstChild("PlayerGui")
+	if playerGui == nil then
+		return nil
+	end
+
+	local existing = playerGui:FindFirstChild("ArrayWaveAudioDiagnostics")
+	if existing ~= nil and existing:IsA("Folder") then
+		diagnosticFolder = existing
+		return existing
+	end
+
+	folder = InstanceUtil.create("Folder", {
+		Name = "ArrayWaveAudioDiagnostics",
+	}, playerGui) :: Folder
+	diagnosticFolder = folder
+	return folder
+end
+
+local function writeDiagnosticsTo(target: Instance)
+	target:SetAttribute("AnalyzerTruthMode", analyzerTruthMode)
+	target:SetAttribute("UsingRealSpectrum", usingRealSpectrum)
+	target:SetAttribute("SpectrumBinCount", spectrumBinCount)
+	target:SetAttribute("SpectrumVariance", spectrumVariance)
+	target:SetAttribute("CurrentAssetId", currentAssetId)
+	target:SetAttribute("AudioFallbackReason", fallbackReason)
+	target:SetAttribute("CurrentAudioMode", mode)
+	target:SetAttribute("CurrentLoudness", currentLoudness)
+end
+
+local function updateDiagnosticAttributes(deltaTime: number)
+	diagnosticAccumulator += deltaTime
+	if diagnosticAccumulator < (Constants.AUDIO_DIAGNOSTIC_ATTRIBUTE_INTERVAL or 0.35) then
+		return
+	end
+
+	diagnosticAccumulator = 0
+	local root = Workspace:FindFirstChild(Constants.CLIENT_VISUALS_FOLDER_NAME)
+	if root ~= nil then
+		writeDiagnosticsTo(root)
+	end
+
+	local folder = getDiagnosticFolder()
+	if folder ~= nil then
+		writeDiagnosticsTo(folder)
+	end
 end
 
 local function averageRange(bands: { number }, startAlpha: number, endAlpha: number): number
@@ -261,15 +377,33 @@ local function averageRange(bands: { number }, startAlpha: number, endAlpha: num
 	return if samples > 0 then total / samples else 0
 end
 
-local function applyAnalysis(rawBands: { number }, rawRms: number, rawPeak: number, deltaTime: number)
+local function applyAnalysis(
+	rawBands: { number },
+	rawRms: number,
+	rawPeak: number,
+	deltaTime: number,
+	truthMode: AnalyzerTruthMode,
+	sourceBinCount: number,
+	sourceVariance: number,
+	loudness: number,
+	reason: string?
+)
 	local now = os.clock()
 	local cleanDelta = math.clamp(NumberUtil.sanitizeFiniteNumber(deltaTime, 1 / 60), 1 / 240, 0.2)
 	local sanitizedRms = clamp01(rawRms)
 	local sanitizedPeak = clamp01(math.max(rawPeak, sanitizedRms))
+	local sanitizedLoudness = clamp01(loudness)
 	local rawBandEnergy = 0
 	local fluxTotal = 0
 	local centroidNumerator = 0
 	local energyTotal = 0
+
+	analyzerTruthMode = truthMode
+	usingRealSpectrum = truthMode == "Spectrum"
+	spectrumBinCount = math.max(0, math.floor(NumberUtil.sanitizeFiniteNumber(sourceBinCount, 0)))
+	spectrumVariance = math.max(0, NumberUtil.sanitizeFiniteNumber(sourceVariance, 0))
+	currentLoudness = sanitizedLoudness
+	fallbackReason = reason
 
 	for index = 1, bandCount do
 		rawBandEnergy += clamp01(rawBands[index] or 0)
@@ -277,7 +411,8 @@ local function applyAnalysis(rawBands: { number }, rawRms: number, rawPeak: numb
 	rawBandEnergy /= math.max(1, bandCount)
 
 	local rawInputEnergy = math.max(sanitizedPeak, sanitizedRms, rawBandEnergy)
-	local inputPeak = math.max(rawInputEnergy, Constants.MIN_VISIBLE_ENERGY)
+	local audible = rawInputEnergy > 0.006
+	local inputPeak = if audible then math.max(rawInputEnergy, Constants.MIN_VISIBLE_ENERGY) else rawInputEnergy
 	local peakSpeed = if inputPeak > rollingPeak then 16 else 0.85
 	local rmsSpeed = if sanitizedRms > rollingRms then 10 else 0.65
 	rollingPeak = NumberUtil.expSmooth(rollingPeak, inputPeak, cleanDelta, peakSpeed)
@@ -338,7 +473,8 @@ local function applyAnalysis(rawBands: { number }, rawRms: number, rawPeak: numb
 	local bandEnergy = math.clamp(energyTotal / math.max(1, bandCount), 0, 1)
 	local normalizedRms = normalizeForVisual(sanitizedRms, 1, 2.4)
 	local normalizedPeak = normalizeForVisual(sanitizedPeak, 1, 2.4)
-	local rms = clamp01(math.max(normalizedRms, bandEnergy * 0.82, bass * 0.42, Constants.MIN_VISIBLE_ENERGY * 0.65))
+	local energyFloor = if audible then Constants.MIN_VISIBLE_ENERGY * 0.65 else 0
+	local rms = clamp01(math.max(normalizedRms, bandEnergy * 0.82, bass * 0.42, energyFloor))
 	local peak = clamp01(math.max(normalizedPeak, rms, bass * 0.95, high * 0.76))
 	local centroid = if energyTotal > 0.0001 then math.clamp(centroidNumerator / energyTotal, 0, 1) else 0
 	local spectralFlux = math.clamp(fluxTotal / math.max(1, bandCount) * 8, 0, 1)
@@ -374,6 +510,13 @@ local function applyAnalysis(rawBands: { number }, rawRms: number, rawPeak: numb
 		visualEnergy = visualEnergy,
 		bands = smoothedBands,
 		time = now,
+		audioMode = mode,
+		analyzerTruthMode = analyzerTruthMode,
+		usingRealSpectrum = usingRealSpectrum,
+		spectrumBinCount = spectrumBinCount,
+		spectrumVariance = spectrumVariance,
+		loudness = currentLoudness,
+		fallbackReason = fallbackReason,
 	}
 
 	notifyFrameChanged()
@@ -383,21 +526,38 @@ local function readAnalyzerFrame(analyzer: AudioAnalyzer, deltaTime: number)
 	local rms = clamp01(readNumberProperty(analyzer, "RmsLevel", 0))
 	local peak = clamp01(readNumberProperty(analyzer, "PeakLevel", rms))
 	local spectrum: { any } = {}
+	local spectrumReason = "Analyzer spectrum unavailable"
 
 	local okSpectrum, spectrumValues = pcall(function()
 		return analyzer:GetSpectrum()
 	end)
 	if okSpectrum and typeof(spectrumValues) == "table" then
 		spectrum = spectrumValues :: { any }
+		spectrumReason = "Analyzer spectrum flat"
 	end
 
-	applyAnalysis(resampleSpectrum(spectrum, rms, peak, os.clock()), rms, peak, deltaTime)
+	local binCount, variance, validSpectrum = computeSpectrumStats(spectrum)
+	if validSpectrum then
+		applyAnalysis(resampleSpectrum(spectrum), rms, peak, deltaTime, "Spectrum", binCount, variance, math.max(rms, peak), nil)
+		return
+	end
+
+	local loudness = math.max(rms, peak)
+	if loudness > 0.006 then
+		applyAnalysis(buildLoudnessBands(loudness, os.clock()), rms, peak, deltaTime, "LoudnessOnly", binCount, variance, loudness, spectrumReason)
+	else
+		applyAnalysis(buildSilentBands(), 0, 0, deltaTime, "Silent", binCount, variance, 0, spectrumReason)
+	end
 end
 
 local function readClassicSoundFrame(sound: Sound, deltaTime: number)
 	local loudness = clamp01(readNumberProperty(sound, "PlaybackLoudness", 0) / 900)
 	local peak = clamp01(loudness * 1.2)
-	applyAnalysis(resampleSpectrum({}, loudness, peak, os.clock()), loudness, peak, deltaTime)
+	if loudness > 0.006 then
+		applyAnalysis(buildLoudnessBands(loudness, os.clock()), loudness, peak, deltaTime, "LoudnessOnly", 0, 0, loudness, "PlaybackLoudness only")
+	else
+		applyAnalysis(buildSilentBands(), 0, 0, deltaTime, "Silent", 0, 0, 0, "PlaybackLoudness only")
+	end
 end
 
 local function scheduleAssetReadinessCheck(readReady: () -> boolean, unavailableStatus: string, attemptId: number)
@@ -416,6 +576,8 @@ local function scheduleAssetReadinessCheck(readReady: () -> boolean, unavailable
 		if mode == "Asset" and isCurrentAttempt(attemptId) then
 			stopAudioGraph()
 			mode = "Demo"
+			stopped = false
+			demoReason = unavailableStatus
 			setStatus(unavailableStatus)
 		end
 	end)
@@ -516,12 +678,18 @@ local function playAssetWithStatus(
 	if assetId == nil then
 		stopAudioGraph()
 		mode = "Demo"
+		stopped = false
+		currentAssetId = nil
+		demoReason = invalidStatus
 		setStatus(invalidStatus)
 		return false
 	end
 
 	setStatus(tryingStatus)
 	local attemptId = nextAudioAttempt()
+	stopped = false
+	currentAssetId = assetId
+	fallbackReason = nil
 
 	if tryModularAsset(assetId, unavailableStatus, attemptId) or tryClassicSound(assetId, unavailableStatus, attemptId) then
 		mode = "Asset"
@@ -531,6 +699,8 @@ local function playAssetWithStatus(
 
 	stopAudioGraph()
 	mode = "Demo"
+	stopped = false
+	demoReason = unavailableStatus
 	setStatus(unavailableStatus)
 	return false
 end
@@ -567,6 +737,9 @@ local function tryMicInput(attemptId: number): boolean
 		if mode == "Mic" and isCurrentAttempt(attemptId) and currentFrame.peak <= 0.01 and currentFrame.rms <= 0.01 then
 			stopAudioGraph()
 			mode = "Demo"
+			stopped = false
+			currentAssetId = nil
+			demoReason = "Mic unavailable - using demo signal"
 			setStatus("Mic unavailable - using demo signal")
 		end
 	end)
@@ -576,7 +749,10 @@ local function tryMicInput(attemptId: number): boolean
 end
 
 function AudioController:_ApplyRawFrame(rawBands: { number }, rawRms: number, rawPeak: number, _rawBass: number, deltaTime: number)
-	applyAnalysis(rawBands, rawRms, rawPeak, deltaTime)
+	local binCount, variance, validSpectrum = computeSpectrumStats(rawBands)
+	local truthMode: AnalyzerTruthMode = if validSpectrum then "Spectrum" else "LoudnessOnly"
+	local reason = if validSpectrum then nil else "Injected frame without shaped spectrum"
+	applyAnalysis(rawBands, rawRms, rawPeak, deltaTime, truthMode, binCount, variance, math.max(rawRms, rawPeak), reason)
 end
 
 function AudioController:_GenerateDemoFrame(deltaTime: number)
@@ -616,7 +792,8 @@ function AudioController:_GenerateDemoFrame(deltaTime: number)
 
 	local rms = clamp01(0.12 + groove * 0.08 + bassSwell * 0.13 + kickPulse * 0.42 + snarePulse * 0.12 + hatPulse * 0.06)
 	local peak = clamp01(rms + kickPulse * 0.34 + snarePulse * 0.18 + hatPulse * 0.12)
-	applyAnalysis(bands, rms, peak, deltaTime)
+	local _, variance = computeSpectrumStats(bands)
+	applyAnalysis(bands, rms, peak, deltaTime, "Demo", #bands, variance, math.max(rms, peak), demoReason)
 end
 
 function AudioController:Init(_context: any)
@@ -635,7 +812,9 @@ function AudioController:Start()
 	started = true
 
 	maid:Give(getRenderSignal():Connect(function(deltaTime: number)
-		if mode == "Demo" then
+		if stopped then
+			applyAnalysis(buildSilentBands(), 0, 0, deltaTime, "Silent", 0, 0, 0, "Stopped")
+		elseif mode == "Demo" then
 			self:_GenerateDemoFrame(deltaTime)
 		elseif mode == "Asset" then
 			if assetAnalyzer ~= nil then
@@ -643,15 +822,24 @@ function AudioController:Start()
 			elseif classicSound ~= nil then
 				readClassicSoundFrame(classicSound, deltaTime)
 			else
+				mode = "Demo"
+				demoReason = "Audio graph unavailable - using demo signal"
+				setStatus("Audio graph unavailable - using demo signal")
 				self:_GenerateDemoFrame(deltaTime)
 			end
 		elseif mode == "Mic" then
 			if micAnalyzer ~= nil then
 				readAnalyzerFrame(micAnalyzer, deltaTime)
 			else
+				mode = "Demo"
+				currentAssetId = nil
+				demoReason = "Mic unavailable - using demo signal"
+				setStatus("Mic unavailable - using demo signal")
 				self:_GenerateDemoFrame(deltaTime)
 			end
 		end
+
+		updateDiagnosticAttributes(deltaTime)
 	end))
 
 	if Constants.DEFAULT_AUDIO_MODE == "Asset" then
@@ -666,18 +854,26 @@ function AudioController:SetMode(nextMode: AudioMode)
 		nextAudioAttempt()
 		stopAudioGraph()
 		mode = "Demo"
+		stopped = false
+		currentAssetId = nil
+		demoReason = "Synthetic demo signal"
 		setStatus("Demo signal active")
 	elseif nextMode == "Asset" then
+		stopped = false
 		setStatus("Enter an audio asset id")
 	elseif nextMode == "Mic" then
 		local attemptId = nextAudioAttempt()
 		stopAudioGraph()
+		stopped = false
+		currentAssetId = nil
+		demoReason = "Mic unavailable - using demo signal"
 		setStatus("Trying mic input")
 		if tryMicInput(attemptId) then
 			mode = "Mic"
 			setStatus("Mic mode active")
 		else
 			mode = "Demo"
+			demoReason = "Mic unavailable - using demo signal"
 			setStatus("Mic unavailable - using demo signal")
 		end
 	end
@@ -707,7 +903,10 @@ function AudioController:Stop()
 	nextAudioAttempt()
 	stopAudioGraph()
 	mode = "Demo"
-	setStatus("Demo signal active")
+	stopped = true
+	currentAssetId = nil
+	setStatus("Stopped")
+	applyAnalysis(buildSilentBands(), 0, 0, 1 / 60, "Silent", 0, 0, 0, "Stopped")
 end
 
 function AudioController:SetSensitivity(value: number)
@@ -721,6 +920,29 @@ end
 
 function AudioController:GetFrame(): AudioFrame
 	return currentFrame
+end
+
+function AudioController:GetDiagnostics(): AudioDiagnostics
+	return {
+		audioMode = mode,
+		analyzerTruthMode = analyzerTruthMode,
+		assetId = currentAssetId,
+		usingRealSpectrum = usingRealSpectrum,
+		spectrumBinCount = spectrumBinCount,
+		spectrumVariance = spectrumVariance,
+		loudness = currentLoudness,
+		rms = currentFrame.rms,
+		peak = currentFrame.peak,
+		fallbackReason = fallbackReason,
+	}
+end
+
+function AudioController:GetSpectrumSnapshot(): { number }
+	local snapshot = table.create(#smoothedBands, 0)
+	for index, value in ipairs(smoothedBands) do
+		snapshot[index] = value
+	end
+	return snapshot
 end
 
 function AudioController:GetBandInterpolated(normalizedIndex: number): number

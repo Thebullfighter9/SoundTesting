@@ -16,6 +16,7 @@ local Maid = require((Util:WaitForChild("Maid") :: ModuleScript))
 local NumberUtil = require((Util:WaitForChild("NumberUtil") :: ModuleScript))
 
 type CameraMode = Types.CameraMode
+type AudioDiagnostics = Types.AudioDiagnostics
 type VisualStyle = Types.VisualStyle
 
 local UIController = {}
@@ -37,6 +38,7 @@ local pillStroke: UIStroke? = nil
 local dockStroke: UIStroke? = nil
 local songIdStroke: UIStroke? = nil
 local statusLabel: TextLabel? = nil
+local analyzerStatusLabel: TextLabel? = nil
 local songIdBox: TextBox? = nil
 local sensValueLabel: TextLabel? = nil
 local motionValueLabel: TextLabel? = nil
@@ -87,6 +89,45 @@ end
 local function setText(label: any, text: string)
 	if label ~= nil then
 		label.Text = text
+	end
+end
+
+local function getAudioDiagnostics(): AudioDiagnostics?
+	local audio = context and context.AudioController
+	if audio == nil or typeof(audio.GetDiagnostics) ~= "function" then
+		return nil
+	end
+
+	local ok, diagnostics = pcall(function()
+		return audio:GetDiagnostics()
+	end)
+	if ok and typeof(diagnostics) == "table" then
+		return diagnostics :: AudioDiagnostics
+	end
+
+	return nil
+end
+
+local function updateAnalyzerStatus()
+	local label = analyzerStatusLabel
+	if label == nil then
+		return
+	end
+
+	local diagnostics = getAudioDiagnostics()
+	local truthMode = if diagnostics ~= nil then diagnostics.analyzerTruthMode else "Silent"
+	if truthMode == "Spectrum" then
+		label.Text = "Spectrum"
+		label.TextColor3 = palette.CyanSoft
+	elseif truthMode == "LoudnessOnly" then
+		label.Text = "Loudness"
+		label.TextColor3 = palette.Amber
+	elseif truthMode == "Demo" then
+		label.Text = "Demo"
+		label.TextColor3 = palette.TextMuted:Lerp(palette.Text, 0.34)
+	else
+		label.Text = "Silent"
+		label.TextColor3 = palette.TextMuted
 	end
 end
 
@@ -383,6 +424,7 @@ local function updateReadouts()
 			else palette.CyanSoft
 	end
 
+	updateAnalyzerStatus()
 	setText(sensValueLabel, string.format("%.2f", audio:GetSensitivity()))
 	setText(motionValueLabel, string.format("%.2f", resonance:GetMotion()))
 	setText(sprayValueLabel, string.format("%.2f", resonance:GetSprayAmount()))
@@ -416,6 +458,7 @@ local function bindStaticUi()
 	pillStroke = pill:FindFirstChildOfClass("UIStroke")
 	dockStroke = dockFrame:FindFirstChildOfClass("UIStroke")
 	statusLabel = expectChild(pill, "StatusLabel", "TextLabel") :: TextLabel
+	analyzerStatusLabel = expectChild(pill, "AnalyzerStatusLabel", "TextLabel") :: TextLabel
 	songIdBox = expectChild(pill, "SongIdBox", "TextBox") :: TextBox
 	songIdStroke = songIdBox:FindFirstChildOfClass("UIStroke")
 
@@ -676,6 +719,7 @@ function UIController:Destroy()
 	tuneDrawer = nil
 	analyzerFrame = nil
 	statusLabel = nil
+	analyzerStatusLabel = nil
 	songIdBox = nil
 	dropMarbleButton = nil
 end
