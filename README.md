@@ -17,4 +17,3 @@ Views:
 - `Row` is the clearest readout.
 - `Circle` wraps the response around the center.
 
-The UI stays small: base song, demo, current view, tune, and the song ID field. There are no keybinds, rounds, quests, NPCs, or simulator panels.
