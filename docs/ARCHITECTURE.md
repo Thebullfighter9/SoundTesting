@@ -1,6 +1,6 @@
-# Architecture
+# Architecture Notes
 
-This project uses a Rojo layout:
+Rojo maps the project like this:
 
 ```text
 src/replicatedfirst -> ReplicatedFirst
@@ -12,27 +12,28 @@ src/client -> StarterPlayer/StarterPlayerScripts/Client
 
 ## UI
 
-`src/startergui/ArrayWaveGui.model.json` is the static UI model. `UIController` binds named instances from that model and does not build the UI tree at runtime.
+`src/startergui/ArrayWaveGui.model.json` is the UI. It is not built again every time the client runs.
 
-The top pill holds the song ID, status text, and a small analyzer truth label. The bottom dock starts collapsed with Base, Demo, current view, and Tune.
+`UIController` only binds named objects from that static model. The top pill has the song ID, status text, and the tiny `Spectrum` / `Loudness` / `Demo` / `Silent` label.
 
 ## Client
 
-`AudioController` produces typed audio frames and diagnostics.
+`AudioController` owns playback, analysis, fallback mode, and diagnostics.
 
-`ResonanceController` creates the local-only sculpture under `Workspace.ArrayWaveClientVisuals`:
+`ResonanceController` builds the local visualizer under `Workspace.ArrayWaveClientVisuals`:
 
 - 441 grid tiles
-- 96 row bars and peak caps
-- 128 radial circle bars
+- 96 row bars
+- 96 row peak caps
+- 128 circle bars
 - pooled pulse rings and light streaks
 
-The visual controller reads `AnalyzerTruthMode` before updating the shapes. Spectrum mode favors direct band response. Loudness-only mode uses amplitude waves. Demo mode uses the synthetic demo signal.
+The visual controller checks the audio truth mode before it moves anything. Real spectrum gets direct band response. Loudness-only gets amplitude motion. Demo gets the local test signal.
 
 ## Server
 
-Server modules build the static place support and optional remote-backed effects. They do not receive per-frame audio or visualizer data.
+The server builds the place support pieces and owns the optional marble remote. It does not receive per-frame visualizer data.
 
-## Lifecycle
+## Startup
 
-Modules expose `Init()` and `Start()`. Requiring a module does not connect loops or start playback. Bootstrap initializes controllers first, then starts them.
+Modules expose `Init()` and `Start()`. Requiring a module should not start playback or connect render loops. Bootstrap initializes first, then starts.

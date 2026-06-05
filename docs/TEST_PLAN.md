@@ -1,43 +1,51 @@
-# Test Plan
+# Test Notes
 
-Use Roblox Studio with Rojo connected to `default.project.json`.
+Run through this in Studio with Rojo connected.
 
-## Studio Checks
+## Startup
 
-- Start a play session and confirm `ArrayWaveGui` appears from the static `StarterGui` model.
-- Confirm `SongIdBox.Text` starts as `9043887091`.
-- Confirm the top pill shows one of `Spectrum`, `Loudness`, `Demo`, or `Silent`.
-- Confirm the bottom dock starts collapsed with Base, Demo, current view, and Tune.
-- Confirm all UI actions use `GuiButton.Activated`.
-- Confirm no project keybinds trigger audio, camera, UI, or visualizer behavior.
+- Start Play.
+- `ArrayWaveGui` should come from `StarterGui`, not from runtime-created UI.
+- The song box should start with `9043887091`.
+- The top pill should show `Spectrum`, `Loudness`, `Demo`, or `Silent`.
+- The bottom dock should start collapsed.
+- There should be no keyboard shortcuts for the project controls.
 
-## Visual Counts
+## Visual Parts
 
-- Confirm `Workspace.ArrayWaveClientVisuals` exists on the client.
-- Confirm `GridArray` contains 441 tiles.
-- Confirm `RowBars` contains 96 bars.
-- Confirm row peak caps exist under `AccentLights.RowPeakCaps`.
-- Confirm `RadialCircle` contains 128 bars.
+Check the client workspace:
 
-## Truth Mode Checks
+- `Workspace.ArrayWaveClientVisuals.GridArray` has 441 tiles.
+- `Workspace.ArrayWaveClientVisuals.RowBars` has 96 bars.
+- `Workspace.ArrayWaveClientVisuals.AccentLights.RowPeakCaps` exists.
+- `Workspace.ArrayWaveClientVisuals.RadialCircle` has 128 bars.
 
-- In Spectrum mode, confirm `UsingRealSpectrum` is true, `SpectrumBinCount` is greater than 0, and `SpectrumVariance` is greater than 0.
-- In Spectrum mode, switch to Row and confirm `RowSpectrumCorrelation` is not `-1`.
-- In Loudness mode, confirm `UsingRealSpectrum` is false and `AnalyzerTruthMode` is `LoudnessOnly`.
-- In Loudness mode, confirm Row looks like an amplitude wave, not a fake per-frequency equalizer.
-- In Demo mode, confirm `AnalyzerTruthMode` is `Demo`.
-- Press Stop and confirm `AnalyzerTruthMode` becomes `Silent` and the sculpture settles.
+Switch through `Grid`, `Row`, and `Circle`. Each mode should show visible parts.
 
-## Shape Checks
+## Audio Truth
 
-- Grid: confirm `GridHeightVariance` rises during active audio or Demo.
-- Row: confirm `RowHeightVariance` rises during active audio or Demo.
-- Circle: confirm `CircleLengthVariance` rises during active audio or Demo.
-- Pulse: confirm `GridRippleCount` or `CircleActiveWaves` increases after pressing Pulse.
+For the base track `9043887091`, read the current diagnostics.
 
-## Code Checks
+If the label says `Spectrum`:
 
-- Confirm every Lua source file starts with `--!strict`.
-- Confirm no keyboard shortcut APIs appear in source.
-- Confirm no per-frame remotes exist.
-- Confirm normal play produces no Output errors.
+- `UsingRealSpectrum` should be true.
+- `SpectrumBinCount` should be above zero.
+- `SpectrumVariance` should be above zero.
+- In Row mode, `RowSpectrumCorrelation` should not be `-1`.
+
+If the label says `Loudness`:
+
+- `UsingRealSpectrum` should be false.
+- `AnalyzerTruthMode` should be `LoudnessOnly`.
+- Row should look like an amplitude wave, not fake frequency bars.
+
+If the label says `Demo`, the local demo signal is running.
+
+Press `Stop`. The label should become `Silent`, and the field should settle.
+
+## Quick Code Checks
+
+- Lua files start with `--!strict`.
+- No project keybind APIs are used.
+- No per-frame remotes exist.
+- Play mode should not print runtime errors.

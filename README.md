@@ -1,21 +1,28 @@
 # SoundTesting: Resonance Field
 
-A Roblox Luau audio visualizer built as a small kinetic sculpture.
+A Roblox audio visualizer test scene.
 
-The default audio asset is `9043887091`. The client tries to read real spectrum data from Roblox's audio analyzer. When Roblox only exposes loudness, the project says so and uses a broad amplitude wave instead of pretending it has per-frequency data. Demo mode is separate and labeled as Demo.
+The visualizer is the project. A client builds a field of parts and moves it from the audio signal Roblox gives back. The default track is `9043887091`.
 
-The piece has three main views:
+The important detail is the signal label in the top pill:
 
-- Grid: a field of local parts that rises from band or amplitude energy.
-- Row: the clearest readout. In Spectrum mode each bar follows a band; in Loudness mode the row becomes an amplitude wave.
-- Circle: a radial version of the same signal with restrained motion.
+- `Spectrum` means `AudioAnalyzer:GetSpectrum()` is working. Row mode can act like real frequency bars.
+- `Loudness` means Roblox only gave amplitude data. It still moves, but it is not a per-frequency display.
+- `Demo` means the local demo signal is running.
+- `Silent` means nothing is driving the field.
 
-The UI is intentionally small: base song, demo, current view, tune, and the song ID field. There are no keybinds, rounds, quests, NPCs, or simulator panels.
+Views:
 
-## Running
+- `Grid` is the main field.
+- `Row` is the clearest readout.
+- `Circle` wraps the response around the center.
+
+The UI stays small: base song, demo, current view, tune, and the song ID field. There are no keybinds, rounds, quests, NPCs, or simulator panels.
+
+## Run It
 
 ```sh
 rojo serve default.project.json
 ```
 
-Connect Roblox Studio to the Rojo server and start a play session.
+Then connect Roblox Studio to the Rojo server and start Play.
